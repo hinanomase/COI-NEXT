@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Voice Chat Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="chat-container" id="chatContainer"></div>
+
+  <div class="controls-container">
+    <button id="btnStart" class="circle-btn">Start</button>
+    <canvas id="myCanvas1"></canvas>
+    <button id="btnMic" class="circle-btn" disabled>Mic</button>
+  </div>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <span class="spinner"></span>
+      <p>接続中...</p>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+  <script src="agent.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
