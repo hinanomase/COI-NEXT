@@ -1,3 +1,9 @@
+#myCanvas1 {
+  height: 300px;
+  max-width: 100%;
+  display: block;
+}
+
 .chat-container {
   width: 90%;
   max-width: 500px;
