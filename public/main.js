@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnMic = document.getElementById('btnMic');
   const overlay = document.getElementById('overlay');
 
-  const BACKEND_URL = "https://your-server.com"; // ←あなたのFastAPIサーバーURLに置き換えてください
+  const BACKEND_URL = "https://coi-next.onrender.com";
   const PROXY_ENDPOINT = `${BACKEND_URL}/api/realtime-proxy`;
   const WEBSOCKET_ENDPOINT = `${BACKEND_URL.replace('http', 'ws')}/ws/function-call`;
 
