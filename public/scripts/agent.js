@@ -41,3 +41,5 @@ class SetAgent {
 }
 
 const Agent = new SetAgent(false, "", modelPath_Agent, resourcePath_Agent, position_Agent, "myCanvas1");
+
+export { Agent }
