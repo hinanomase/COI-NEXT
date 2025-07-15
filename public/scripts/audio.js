@@ -6,9 +6,21 @@ audio.onplay = () => Agent.startAgentSpeak();
 audio.onended = () => Agent.stopAgentSpeak();
 
 export function playAudioBlob(blob) {
-  const url = URL.createObjectURL(blob);
-  audio.src = url;
-  audio.play();
+  return new Promise((resolve, reject) => {
+    const audioURL = URL.createObjectURL(blob);
+    const audio = new Audio(audioURL);
+
+    audio.addEventListener('ended', () => {
+      URL.revokeObjectURL(audioURL); // メモリ解放
+      resolve();
+    });
+
+    audio.addEventListener('error', (e) => {
+      reject(e);
+    });
+
+    audio.play().catch(reject);
+  });
 }
 
 export function enableMic(localStream) {

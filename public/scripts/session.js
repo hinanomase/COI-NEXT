@@ -53,9 +53,11 @@ export async function startSession() {
 
     const dummyTrack = createDummyAudioTrack();
     peerConnection.addTrack(dummyTrack, new MediaStream([dummyTrack]));
+    // transcriptionPC.addTrack(dummyTrack, new MediaStream([dummyTrack]));
 
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     localStream.getTracks().forEach(track => transcriptionPC.addTrack(track, localStream));
+    // localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
     dataChannel = peerConnection.createDataChannel("oai-events");
     transcriptionDataChannel = transcriptionPC.createDataChannel("oai-events");
