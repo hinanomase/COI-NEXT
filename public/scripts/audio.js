@@ -10,7 +10,12 @@ export function playAudioBlob(blob) {
     const audioURL = URL.createObjectURL(blob);
     const audio = new Audio(audioURL);
 
+    audio.addEventListener('playing', () => {
+      Agent.startAgentSpeak();
+    });
+
     audio.addEventListener('ended', () => {
+      Agent.stopAgentSpeak();
       URL.revokeObjectURL(audioURL); // メモリ解放
       resolve();
     });
