@@ -70,7 +70,7 @@ export async function playTextAsAudio(text) {
   // }
 
   // const blob = await resp.blob();
-  // playAudioBlob(blob);
+  // await playAudioBlob(blob);
   // addBubble(text);
 }
 

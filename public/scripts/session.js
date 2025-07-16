@@ -35,7 +35,7 @@ export async function startSession() {
     document.body.appendChild(audioEl);
 
     peerConnection.ontrack = (event) => {
-      audioEl.srcObject = event.streams[0];
+      // audioEl.srcObject = event.streams[0];
       console.log("onTrack");
     };
 
