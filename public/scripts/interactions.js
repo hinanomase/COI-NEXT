@@ -17,7 +17,6 @@ export async function fetchQuestion() {
       const msg = JSON.parse(event.data);
       if (msg.type === "question") {
         webSocket.removeEventListener("message", onQuestion);
-        console.log("question:", msg.text);
         resolve(msg.text);
       }
     };
@@ -150,6 +149,39 @@ export async function sendUserResponse(text) {
   }));
 }
 
+export async function requestAdvicePrompt() {
+  webSocket.send(JSON.stringify({
+    type: "generate_prompt"
+  }));
+}
+
+export async function generateAdvice(prompt) {
+  await sendInstruction(prompt);
+  await requestResponse();
+
+  
+  const adviceText = await new Promise((resolve) => {
+    const onMessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "response.output_item.done") {
+        const content = msg.item?.content?.[0]?.text?.trim();
+        if (content) {
+          dataChannel.removeEventListener("message", onMessage);
+          resolve(content);
+        }
+      }
+    };
+    dataChannel.addEventListener("message", onMessage);
+  });
+
+  const { formattedText, indexList } = parseAdviceText(adviceText);
+  
+  console.log("📌 アドバイス整形済み:\n", formattedText);
+  console.log("📎 抽出されたindex:", indexList);
+
+  return formattedText;
+}
+
 export async function sendConversation(text, role) {
   const type = role === "user" ? "input_text" : "text";
   const event = {
@@ -186,7 +218,8 @@ export function addBubble(text, isUser = false) {
   const chatContainer = document.getElementById("chatContainer");
   const div = document.createElement("div");
   div.className = isUser ? "bubble bubble-user" : "bubble bubble-ai";
-  div.textContent = text;
+  // div.textContent = text;
+  div.innerHTML = text.replace(/\n/g, "<br>");
   chatContainer.appendChild(div);
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
@@ -207,4 +240,29 @@ export async function restoreConversationHistory(state) {
   }
 }
 
+function parseAdviceText(adviceText) {
+  const indexList = [];
+  const formattedLines = [];
+
+  // 正規表現でアドバイス部分を抽出
+  const regex = /index:\s*(\d+),\s*advice:\s*([^\n]+)/g;
+  let match;
+
+  while ((match = regex.exec(adviceText)) !== null) {
+    const index = parseInt(match[1], 10);
+    const advice = match[2].trim();
+
+    indexList.push(index);
+    formattedLines.push(`・${advice}`);
+  }
+
+  // 前後のナラティブ（「いくつかアドバイスを...」など）を残したい場合
+  const intro = adviceText.split("index:")[0]?.trim();
+  const finalText = [intro, ...formattedLines].filter(Boolean).join("\n");
+
+  return {
+    formattedText: finalText,
+    indexList: indexList,
+  };
+}
 
