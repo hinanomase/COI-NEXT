@@ -2,9 +2,8 @@
  * 一連の流れを管理
  */
 
-import { addBubble, fetchQuestion, playTextAsAudio, getUserResponse, playAgentReaction, sendUserResponse, requestAdvicePrompt, generateAdvice } from './interactions.js';
+import { addBubble, fetchQuestion, playTextAsAudio, getUserResponse, playAgentReaction, sendUserResponse, generateAdvice } from './interactions.js';
 import { getCurrentQuestion, setCurrentQuestion, getQuestionNum, endSession } from './session.js';
-import { waitForAdvicePrompt } from './websocket.js';
 
 export async function startConversation() {
   while (getCurrentQuestion() < getQuestionNum()) {
@@ -17,11 +16,7 @@ export async function startConversation() {
     await sendUserResponse(userText);
     setCurrentQuestion(getCurrentQuestion()+1);
   }
-  requestAdvicePrompt();
-  const prompt = await waitForAdvicePrompt();
-  const advice = await generateAdvice(prompt);
-  addBubble(advice);
-  playTextAsAudio(advice);
+  await generateAdvice();
 
-  endSession();
+  // endSession();
 }

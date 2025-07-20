@@ -102,7 +102,7 @@ export function getUserResponse() {
 export async function playAgentReaction(userText) {
   console.log("agent reaction");
 
-  const instruction = "次の回答ではユーザーの回答に対して軽くリアクションしてください．追加で質問はしないでください";
+  const instruction = "次の回答ではユーザーの回答に対して30字程度で軽くリアクションしてください．追加で質問はしないでください";
   await sendInstruction(instruction);
   await sendConversation(userText, "user");
   await requestResponse();
@@ -149,37 +149,10 @@ export async function sendUserResponse(text) {
   }));
 }
 
-export async function requestAdvicePrompt() {
+export async function generateAdvice() {
   webSocket.send(JSON.stringify({
-    type: "generate_prompt"
+    type: "generate_advice"
   }));
-}
-
-export async function generateAdvice(prompt) {
-  await sendInstruction(prompt);
-  await requestResponse();
-
-  
-  const adviceText = await new Promise((resolve) => {
-    const onMessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "response.output_item.done") {
-        const content = msg.item?.content?.[0]?.text?.trim();
-        if (content) {
-          dataChannel.removeEventListener("message", onMessage);
-          resolve(content);
-        }
-      }
-    };
-    dataChannel.addEventListener("message", onMessage);
-  });
-
-  const { formattedText, indexList } = parseAdviceText(adviceText);
-  
-  console.log("📌 アドバイス整形済み:\n", formattedText);
-  console.log("📎 抽出されたindex:", indexList);
-
-  return formattedText;
 }
 
 export async function sendConversation(text, role) {
@@ -240,14 +213,21 @@ export async function restoreConversationHistory(state) {
   }
 }
 
-function parseAdviceText(adviceText) {
+export function parseAdviceText(adviceText) {
   const indexList = [];
   const formattedLines = [];
 
-  // 正規表現でアドバイス部分を抽出
+  // intro: を取り出す
+  const introMatch = adviceText.match(/intro:\s*(.+?)(?=\n|$)/s);
+  const intro = introMatch ? introMatch[1].trim() : "";
+
+  // outro: を取り出す
+  const outroMatch = adviceText.match(/outro:\s*(.+?)(?=\n|$)/s);
+  const outro = outroMatch ? outroMatch[1].trim() : "";
+
+  // "index: ..." をすべて取り出す（含まれなくても大丈夫）
   const regex = /index:\s*(\d+),\s*advice:\s*([^\n]+)/g;
   let match;
-
   while ((match = regex.exec(adviceText)) !== null) {
     const index = parseInt(match[1], 10);
     const advice = match[2].trim();
@@ -255,14 +235,13 @@ function parseAdviceText(adviceText) {
     indexList.push(index);
     formattedLines.push(`・${advice}`);
   }
-
-  // 前後のナラティブ（「いくつかアドバイスを...」など）を残したい場合
-  const intro = adviceText.split("index:")[0]?.trim();
-  const finalText = [intro, ...formattedLines].filter(Boolean).join("\n");
+  const finalText = [intro, ...formattedLines, outro].filter(Boolean).join("\n");
 
   return {
-    formattedText: finalText,
-    indexList: indexList,
+    advice: finalText,
+    index: indexList,
   };
 }
+
+
 

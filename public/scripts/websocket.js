@@ -3,10 +3,10 @@
  */
 
 import { WEBSOCKET_ENDPOINT } from './config.js';
-import { pendingCalls, setBufferedSessionState, setCurrentQuestion, setQuestionNum } from './session.js';
+import { addBubble, parseAdviceText, playTextAsAudio } from './interactions.js';
+import { endSession, pendingCalls, setBufferedSessionState, setCurrentQuestion, setQuestionNum } from './session.js';
 
 export let webSocket;
-let advicePromptResolver = null;
 
 export function setupWebSocket() {
   return new Promise((resolve, reject) => {
@@ -24,7 +24,7 @@ export function setupWebSocket() {
     webSocket.onerror = () => reject(new Error("WebSocket接続に失敗しました"));
     webSocket.onclose = () => reject(new Error("WebSocketが閉じられました"));
 
-    webSocket.onmessage = (event) => {
+    webSocket.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
 
       if (msg.call_id) {
@@ -64,12 +64,13 @@ export function setupWebSocket() {
           console.log("回答が保存されました");
           break;
 
-        case "prompt_generated":
-          console.log("アドバイスプロンプト", msg.prompt);
-          if (advicePromptResolver) {
-            advicePromptResolver(msg.prompt);
-            advicePromptResolver = null;
-          }
+        case "advice_generated":
+          console.log(msg.advice);
+          const { advice, index } = parseAdviceText(msg.advice);
+    
+          addBubble(advice);
+          await playTextAsAudio(advice);
+          endSession();
           break;
 
         case "end":
@@ -89,11 +90,5 @@ export function setupWebSocket() {
           console.warn("未知のメッセージ:", msg);
       }
     };
-  });
-}
-
-export function waitForAdvicePrompt() {
-  return new Promise((resolve) => {
-    advicePromptResolver = resolve;
   });
 }
