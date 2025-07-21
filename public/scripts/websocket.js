@@ -7,6 +7,7 @@ import { addBubble, parseAdviceText, playTextAsAudio } from './interactions.js';
 import { endSession, pendingCalls, setBufferedSessionState, setCurrentQuestion, setQuestionNum } from './session.js';
 
 export let webSocket;
+export let pendingAdvice;
 
 export function setupWebSocket() {
   return new Promise((resolve, reject) => {
@@ -68,9 +69,7 @@ export function setupWebSocket() {
           console.log(msg.advice);
           const { advice, index } = parseAdviceText(msg.advice);
     
-          addBubble(advice);
-          await playTextAsAudio(advice);
-          endSession();
+          pendingAdvice = advice;
           break;
 
         case "end":
