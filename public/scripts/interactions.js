@@ -139,6 +139,45 @@ export async function sendUserResponse(text) {
   }));
 }
 
+export async function requestAdvicePrompt() {
+  webSocket.send(JSON.stringify({
+    type: "generate_prompt",
+    isRealtime: true
+  }));
+}
+
+export async function generateAdvice(prompt) {
+  await sendInstruction(prompt);
+  await requestResponse();
+  Agent.startAgentSpeak();
+
+  // return new Promise(resolve => {
+  //   const onMessage = (e) => {
+  //     const msg = JSON.parse(e.data);
+  //     if (msg.type === "output_audio_buffer.stopped") {
+  //       Agent.stopAgentSpeak();
+  //       dataChannel.removeEventListener("message", onMessage);
+  //       resolve();
+  //     }
+  //   };
+  //   dataChannel.addEventListener("message", onMessage);
+  // });
+
+  return new Promise(resolve => {
+  const onMessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "response.output_item.done") {
+      Agent.stopAgentSpeak();
+      const advice = msg.item?.content?.[0]?.transcript?.trim();
+      addBubble(advice);
+      dataChannel.removeEventListener("message", onMessage);
+      resolve();
+    }
+  };
+  dataChannel.addEventListener("message", onMessage);
+});
+}
+
 export async function sendConversation(text, role) {
   const type = role === "user" ? "input_text" : "text";
   const event = {

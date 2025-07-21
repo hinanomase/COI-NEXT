@@ -6,6 +6,7 @@ import { WEBSOCKET_ENDPOINT } from './config.js';
 import { pendingCalls, setBufferedSessionState, setCurrentQuestion, setQuestionNum } from './session.js';
 
 export let webSocket;
+let advicePromptResolver = null;
 
 export function setupWebSocket() {
   return new Promise((resolve, reject) => {
@@ -62,6 +63,14 @@ export function setupWebSocket() {
           console.log("回答が保存されました");
           break;
 
+        case "prompt_generated":
+          console.log("アドバイスプロンプト", msg.prompt);
+          if (advicePromptResolver) {
+            advicePromptResolver(msg.prompt);
+            advicePromptResolver = null;
+          }
+          break;
+
         case "end":
           console.log("すべての質問が終了しました");
           break;
@@ -79,5 +88,11 @@ export function setupWebSocket() {
           console.warn("未知のメッセージ:", msg);
       }
     };
+  });
+}
+
+export function waitForAdvicePrompt() {
+  return new Promise((resolve) => {
+    advicePromptResolver = resolve;
   });
 }
