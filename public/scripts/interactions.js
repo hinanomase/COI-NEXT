@@ -151,31 +151,43 @@ export async function generateAdvice(prompt) {
   await requestResponse();
   Agent.startAgentSpeak();
 
-  // return new Promise(resolve => {
-  //   const onMessage = (e) => {
-  //     const msg = JSON.parse(e.data);
-  //     if (msg.type === "output_audio_buffer.stopped") {
-  //       Agent.stopAgentSpeak();
-  //       dataChannel.removeEventListener("message", onMessage);
-  //       resolve();
-  //     }
-  //   };
-  //   dataChannel.addEventListener("message", onMessage);
-  // });
+  let transcriptText = null;
 
-  return new Promise(resolve => {
-  const onMessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === "response.output_item.done") {
-      Agent.stopAgentSpeak();
-      const advice = msg.item?.content?.[0]?.transcript?.trim();
-      addBubble(advice);
-      dataChannel.removeEventListener("message", onMessage);
-      resolve();
-    }
-  };
-  dataChannel.addEventListener("message", onMessage);
-});
+  // 音声終了を待つ Promise
+  const waitForAudioStop = new Promise(resolve => {
+    const onAudioMessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "output_audio_buffer.stopped") {
+        Agent.stopAgentSpeak();
+        dataChannel.removeEventListener("message", onAudioMessage);
+        resolve();
+      }
+    };
+    dataChannel.addEventListener("message", onAudioMessage);
+  });
+
+  // transcript を即時 addBubble する Promise（終了を待つ）
+  const waitForTranscript = new Promise(resolve => {
+    const onTextMessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "response.output_item.done") {
+        dataChannel.removeEventListener("message", onTextMessage);
+
+        transcriptText = msg.item?.content?.[0]?.transcript?.trim();
+        if (transcriptText) {
+          addBubble(transcriptText);  // 👈 すぐに UI に反映
+        }
+
+        resolve(transcriptText);  // Promise は終わらせる
+      }
+    };
+    dataChannel.addEventListener("message", onTextMessage);
+  });
+
+  // 両方完了するのを待つ（音声は最後まで再生させる）
+  await Promise.all([waitForAudioStop, waitForTranscript]);
+
+  return transcriptText;  // 必要なら返す
 }
 
 export async function sendConversation(text, role) {
