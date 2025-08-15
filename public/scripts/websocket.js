@@ -49,6 +49,7 @@ export function setupWebSocket() {
 
         case "session_loaded":
           console.log("セッションが復元されました:", msg.session_id);
+          console.log("state:", msg.state);
           localStorage.setItem("session_id", msg.session_id);
           setBufferedSessionState(msg.state);
           setCurrentQuestion(msg.state.current_index || 0);

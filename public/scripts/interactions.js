@@ -17,7 +17,6 @@ export async function fetchQuestion() {
       const msg = JSON.parse(event.data);
       if (msg.type === "question") {
         webSocket.removeEventListener("message", onQuestion);
-        console.log("question:", msg.text);
         resolve(msg.text);
       }
     };
@@ -33,25 +32,30 @@ export async function fetchQuestion() {
 export async function playTextAsAudio(text) {
   console.log("play question");
 
-  const instruction = "次に送られるassistantのテキストはそのままユーザーへの質問として日本語で読み上げてください。自分で内容を変えたり追加しないでください。";
-  await sendInstruction(instruction);
+  // const instruction = "次の回答では質問文をユーザーにそのまま返してください";
+  // await sendInstruction(instruction);
   await sendConversation(text, "assistant");
-  await requestResponse();
-  Agent.startAgentSpeak();
+  // await requestResponse();
+  // Agent.startAgentSpeak();
 
-  addBubble(text);
+  // addBubble(text);
 
-  return new Promise(resolve => {
-    const onMessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "output_audio_buffer.stopped") {
-        Agent.stopAgentSpeak();
-        dataChannel.removeEventListener("message", onMessage);
-        resolve();
-      }
-    };
-    dataChannel.addEventListener("message", onMessage);
-  });
+  // return new Promise(resolve => {
+  //   const onMessage = (e) => {
+  //     const msg = JSON.parse(e.data);
+  //     if (msg.type === "output_audio_buffer.stopped") {
+  //       Agent.stopAgentSpeak();
+  //       dataChannel.removeEventListener("message", onMessage);
+  //       resolve();
+  //     }
+  //   };
+  //   dataChannel.addEventListener("message", onMessage);
+  // });
+
+  // Google TTS
+    const response = await fetch(`${TTS_ENDPOINT}?text=${encodeURIComponent(text)}`);
+    const audioBlob = await response.blob();
+    await playAudioBlob(audioBlob);
 
   // const resp = await fetch(TTS_ENDPOINT, {
   //   method: "POST",
@@ -65,7 +69,7 @@ export async function playTextAsAudio(text) {
   // }
 
   // const blob = await resp.blob();
-  // playAudioBlob(blob);
+  // await playAudioBlob(blob);
   // addBubble(text);
 }
 
@@ -103,33 +107,39 @@ export async function playAgentReaction(userText) {
   await sendConversation(userText, "user");
   await requestResponse();
 
-  Agent.startAgentSpeak();
-
-  return new Promise(resolve => {
-    const onMessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "output_audio_buffer.stopped") {
-        Agent.stopAgentSpeak();
-        dataChannel.removeEventListener("message", onMessage);
-        resolve();
-      }
-    };
-    dataChannel.addEventListener("message", onMessage);
-  });
-
+  // Agent.startAgentSpeak();
   // return new Promise(resolve => {
   //   const onMessage = (e) => {
   //     const msg = JSON.parse(e.data);
-  //     if (msg.type === "response.audio_transcript.done") {
-  //       const aiText = msg.transcript;
-  //       if (aiText) {
-  //         dataChannel.removeEventListener("message", onMessage);
-  //         resolve(aiText);
-  //       }
+  //     if (msg.type === "output_audio_buffer.stopped") {
+  //       Agent.stopAgentSpeak();
+  //       dataChannel.removeEventListener("message", onMessage);
+  //       resolve();
   //     }
   //   };
   //   dataChannel.addEventListener("message", onMessage);
   // });
+
+  return new Promise(resolve => {
+    const onMessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "response.audio_transcript.done") {
+        const aiText = msg.transcript;
+        if (aiText) {
+          dataChannel.removeEventListener("message", onMessage);
+          resolve(aiText);
+        }
+      }
+      else if(msg.type === "response.output_item.done") {
+        const aiText = msg.item?.content?.[0]?.text?.trim();
+        if (aiText) {
+          dataChannel.removeEventListener("message", onMessage);
+          resolve(aiText);
+        }
+      }
+    };
+    dataChannel.addEventListener("message", onMessage);
+  });
 }
 
 export async function sendUserResponse(text) {
@@ -222,11 +232,12 @@ export async function requestResponse() {
   dataChannel.send(JSON.stringify({ type: 'response.create' }));
 }
 
-function addBubble(text, isUser = false) {
+export function addBubble(text, isUser = false) {
   const chatContainer = document.getElementById("chatContainer");
   const div = document.createElement("div");
   div.className = isUser ? "bubble bubble-user" : "bubble bubble-ai";
-  div.textContent = text;
+  // div.textContent = text;
+  div.innerHTML = text.replace(/\n/g, "<br>");
   chatContainer.appendChild(div);
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
@@ -247,4 +258,33 @@ export async function restoreConversationHistory(state) {
   }
 }
 
+function parseAdviceText(adviceText) {
+  const indexList = [];
+  const formattedLines = [];
+
+  // intro: を取り出す
+  const introMatch = adviceText.match(/intro:\s*(.+?)(?=\n|$)/s);
+  const intro = introMatch ? introMatch[1].trim() : "";
+
+  // outro: を取り出す
+  const outroMatch = adviceText.match(/outro:\s*(.+?)(?=\n|$)/s);
+  const outro = outroMatch ? outroMatch[1].trim() : "";
+
+  // "index: ..." をすべて取り出す（含まれなくても大丈夫）
+  const regex = /index:\s*(\d+),\s*advice:\s*([^\n]+)/g;
+  let match;
+  while ((match = regex.exec(adviceText)) !== null) {
+    const index = parseInt(match[1], 10);
+    const advice = match[2].trim();
+
+    indexList.push(index);
+    formattedLines.push(`・${advice}`);
+  }
+  const finalText = [intro, ...formattedLines, outro].filter(Boolean).join("\n");
+
+  return {
+    formattedText: finalText,
+    indexList: indexList,
+  };
+}
 

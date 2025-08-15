@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Eye Landmark Player</title>
+  <style>
+    body { font-family: sans-serif; }
+    #ui-container {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 10000;
+      background: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    #controls {
+      margin-top: 10px;
+    }
+    #timer {
+      font-size: 1.2em;
+      margin-top: 10px;
+      color: #2196F3;
+    }
+    canvas {
+      border: 1px solid #333;
+      position: fixed;
+      top: 120px;
+      left: 20px;
+      z-index: 9999;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui-container">
+    <h2>目のランドマーク再生テスト</h2>
+    <div>
+      <label for="fileInput">データファイル選択:</label>
+      <input type="file" id="fileInput" accept=".json">
+      <button id="loadBtn" disabled>ロード</button>
+    </div>
+    <div id="controls" style="display:none;">
+      <label for="questionSelect">何問目:</label>
+      <select id="questionSelect"></select>
+      <label for="phaseSelect">Phase:</label>
+      <select id="phaseSelect">
+        <option value="question">question</option>
+        <option value="answer">answer</option>
+        <option value="reaction">reaction</option>
+        <option value="advice">advice</option>
+      </select>
+      <button id="playBtn">再生</button>
+    </div>
+    <div id="timer"></div>
+  </div>
+  <canvas id="eyeCanvas" width="640" height="480"></canvas>
+
+  <script>
+    const canvas = document.getElementById('eyeCanvas');
+    const ctx = canvas.getContext('2d');
+    let eyeData = [];
+    let filteredData = [];
+    let frameIdx = 0;
+    let timer = null;
+    let startElapsed = 0;
+
+    document.getElementById('fileInput').addEventListener('change', function() {
+      document.getElementById('loadBtn').disabled = !this.files.length;
+    });
+
+    document.getElementById('loadBtn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('fileInput');
+      if (!fileInput.files.length) return;
+      const file = fileInput.files[0];
+      await loadEyeLandmarkData(file);
+    });
+
+    document.getElementById('playBtn').addEventListener('click', () => {
+      const qIdx = Number(document.getElementById('questionSelect').value);
+      const phase = document.getElementById('phaseSelect').value;
+      filteredData = eyeData.filter(d => d.questionIndex === qIdx && d.phase === phase);
+      if (filteredData.length === 0) {
+        alert("選択した条件のデータがありません");
+        return;
+      }
+      frameIdx = 0;
+      startElapsed = filteredData[0].elapsed;
+      playLoop();
+    });
+
+    async function loadEyeLandmarkData(file) {
+      try {
+        const text = await file.text();
+        eyeData = JSON.parse(text);
+        // questionIndexのリストを抽出
+        const questions = [...new Set(eyeData.map(d => d.questionIndex))].sort((a,b)=>a-b);
+        const qSelect = document.getElementById('questionSelect');
+        qSelect.innerHTML = "";
+        questions.forEach(q => {
+          const opt = document.createElement('option');
+          opt.value = q;
+          opt.textContent = q;
+          qSelect.appendChild(opt);
+        });
+        document.getElementById('controls').style.display = "";
+        document.getElementById('timer').textContent = "";
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        alert("データ読み込みエラー: " + e);
+      }
+    }
+
+    function drawEyeLandmarks(landmarks) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!landmarks || landmarks.length === 0) return;
+
+      const leftEyeOuter = landmarks[0];   // 33
+      const rightEyeOuter = landmarks[14]; // 362
+
+      const eyeWidthPx = Math.abs(rightEyeOuter.x - leftEyeOuter.x) * canvas.width;
+      const targetWidth = canvas.width * 0.8;
+      const scale = targetWidth / eyeWidthPx;
+
+      ctx.save();
+      ctx.translate(canvas.width * 0.1, canvas.height * 0.5);
+      ctx.scale(scale, scale);
+
+      // 眼球輪郭のインデックス
+      const eyeballIdxs = [
+        8, 9, 10, 11, 12, // 468~472
+        21, 22, 23, 24, 25 // 473~477
+      ];
+
+      // 目のランドマーク点（輪郭）
+      ctx.fillStyle = "#0000FF";
+      for (let i = 0; i < landmarks.length; i++) {
+        if (!landmarks[i]) continue;
+        // 眼球輪郭・中心は後で色変更
+        if (eyeballIdxs.includes(i)) continue;
+        const x = (landmarks[i].x - leftEyeOuter.x) * canvas.width;
+        const y = (landmarks[i].y - leftEyeOuter.y) * canvas.height;
+        ctx.beginPath();
+        ctx.arc(x, y, 2 / scale, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      // 眼球中心＋輪郭4点
+      ctx.fillStyle = "#dc143c";
+      for (const idx of eyeballIdxs) {
+        const pt = landmarks[idx];
+        if (!pt) continue;
+        const x = (pt.x - leftEyeOuter.x) * canvas.width;
+        const y = (pt.y - leftEyeOuter.y) * canvas.height;
+        ctx.beginPath();
+        ctx.arc(x, y, 4 / scale, 0, 2 * Math.PI);
+        ctx.fill(); 
+      }
+
+      ctx.restore();
+    }
+
+    function playLoop() {
+      if (frameIdx >= filteredData.length) {
+        document.getElementById('timer').textContent = "再生終了";
+        return;
+      }
+      const frame = filteredData[frameIdx];
+      drawEyeLandmarks(frame.eyeLandmarks);
+
+      // 秒数表示（elapsedはms）
+      const sec = ((frame.elapsed - startElapsed) / 1000).toFixed(2);
+      document.getElementById('timer').textContent = `再生中: ${sec} 秒`;
+
+      frameIdx++;
+      if (frameIdx < filteredData.length) {
+        // 次のフレームまでの待ち時間
+        const nextElapsed = filteredData[frameIdx].elapsed - frame.elapsed;
+        timer = setTimeout(playLoop, nextElapsed);
+      }
+    }
+  </script>
+</body>
+</html>
