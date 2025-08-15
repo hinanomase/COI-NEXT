@@ -43,7 +43,7 @@ export async function startConversation() {
     addBubble(pendingAdvice);
     await playTextAsAudio(pendingAdvice);
     stopCollecting();
-    sendEyeLandmarkData();
+    await sendEyeLandmarkData();
     endSession();
   } else {
     // 念のため遅延で待つ（アドバイスが遅れて届くケース）
@@ -62,7 +62,7 @@ export async function startConversation() {
     addBubble(advice);
     await playTextAsAudio(advice);
     stopCollecting();
-    sendEyeLandmarkData();
+    await sendEyeLandmarkData();
     endSession();
   }
 }
