@@ -43,6 +43,7 @@ export async function playTextAsAudio(text) {
    </form>
    <pre id="assistantText"></pre>
 */
+
 const form = document.getElementById("chatForm");
 const input = document.getElementById("chatInput");
 if (form && input) {

@@ -163,6 +163,7 @@ function tryParseJSON(s) {
   }
 }
 
+
 /** Live API からの1件のメッセージ(JSON)を処理 */
 function handleLiveMessage(msg) {
   // setup 完了（setupComplete または最初の serverContent）
