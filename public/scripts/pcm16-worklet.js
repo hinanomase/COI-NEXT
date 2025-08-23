@@ -2,7 +2,7 @@
 class PCM16WorkletProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.inRate = sampleRate; // 例: 48000/44100
+    this.inRate = sampleRate; 
     this.buf = [];
 
     // ---- 1次ローパス（~3kHz）----
@@ -97,7 +97,7 @@ class PCM16WorkletProcessor extends AudioWorkletProcessor {
     if (this.buf.length >= this.chunkSamples) {
       let payload;
       if (this.pendingPre && this.pendingPre.length) {
-        // ★最初のチャンクにプレロールを先頭結合
+        // 最初のチャンクにプレロールを先頭結合
         payload = new Int16Array(this.pendingPre.length + this.buf.length);
         payload.set(this.pendingPre, 0);
         payload.set(this.buf, this.pendingPre.length);

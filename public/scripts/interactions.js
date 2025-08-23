@@ -44,31 +44,25 @@ export async function playTextAsAudio(text) {
   }
 }
 
-// Stop不要：VAD → 最終テキスト（500ms静穏）を採用
 export async function getUserResponse() {
-  beginUserTurn();            // この質問の回答受付を開始
-  primeOneSentenceReaction(); // 返答は短いリアクションに限定
+  beginUserTurn();            
+  primeOneSentenceReaction(); 
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    // 1) 発話の終わり（VAD）を待つ
     await awaitUtteranceEnd(15000);
-    // 2) さらに 500ms 変化がないのを待ち、"最終版" を決定
     const finalText = (await awaitStableTranscript(500, 2000)).trim();
     const ok = isValidTranscript(finalText, getLastUtterMs());
     if (ok) { addBubble(finalText, true); return finalText; }
 
-    // 取りこぼし：丁寧にもう一度お願いして、同じ質問のまま待つ
     await playTextAsAudio("もう一度お願いします");
-    beginUserTurn(); // もう一度この質問の回答を受付
+    beginUserTurn(); 
   }
   return "";
 }
 
-/**
- * Gemini に「自然で共感的な1〜2文」のリアクションを生成させる
- */
+
 export async function playAgentReaction(userText) {
-  if (!userText) return ""; // 未取得なら反応しない（同じ質問を継続）
+  if (!userText) return ""; 
 
   const prompt = [
     "あなたはメンタルヘルス対話の日本語アシスタントです。",
@@ -91,31 +85,17 @@ export async function sendUserResponse(text) {
   webSocket.send(JSON.stringify({ type: "user_response", text }));
 }
 
-/* =========================
-   ★ 追加: 最後のアドバイス生成
-   ========================= */
 
-// サーバに「アドバイス用の集約プロンプトを作って送って」と依頼
 export function requestAdvicePrompt() {
   webSocket.send(JSON.stringify({ type: "generate_prompt" }));
 }
 
-// 受け取ったプロンプトを Gemini に投げて、簡潔な最終メッセージを作る
+
 export async function generateAdvice(prompt) {
   const guide = [
     "あなたはメンタルヘルスの日本語アシスタントです。",
     "以下の情報をもとに、ユーザーに向けた短いまとめメッセージを 3〜6 文で作成してください。",
     "- これまでの発話から感じられる気持ちの要約（共感）",
-    "- 日常で取り入れやすい1〜2個の優しい提案（選べる形/押し付けない）",
-    "- 努力や工夫を認める一言",
-    "禁止: 医療的診断/危険な助言/断定的表現/長すぎる文章。",
-    "出力フォーマット（厳守）:",
-    "intro: 1文の導入（共感）",
-    "index: 1, advice: ～（20〜40字）",
-    "index: 2, advice: ～（20〜40字）",
-    "outro: 1文の締め（励まし）",
-    "",
-    "[素材]",
     prompt || ""
   ].join("\n");
 
@@ -134,8 +114,6 @@ export function addBubble(text, isUser = false) {
   chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-/* ====== ユーティリティ ====== */
-// 最短 250ms / 1文字以上。日本語文字を推奨。
 function isValidTranscript(text, utterMs) {
   if (!text) return false;
   const t = text.trim();
@@ -145,7 +123,7 @@ function isValidTranscript(text, utterMs) {
   return hasJa || t.length >= 4;
 }
 
-// アドバイスの整形（フォーマットを吸収）
+
 function parseAdviceText(adviceText) {
   if (!adviceText) return { formattedText: "" };
   const formatted = [];
