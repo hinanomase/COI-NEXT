@@ -1,174 +1,184 @@
-/**
- * Realtime APIやFastAPIサーバーとの通信を確立する
- */
+// public/scripts/session.js
+import { LIVE_WS_BASE } from "./config.js";
+import { playTextAsAudio, appendAssistantText, appendUserText } from "./interactions.js";
 
-import { setupWebSocket } from './websocket.js';
-import { waitForConnectionState, waitForDataChannelOpen, createDummyAudioTrack } from './utils.js';
-import { startConversation } from './conversation.js';
-import { BACKEND_URL, PROXY_ENDPOINT, TRANSCRIPT_PROXY_ENDPOINT } from './config.js';
-import { restoreConversationHistory } from './interactions.js';
+export let liveSocket = null;
+let ready = false;
 
-export let peerConnection;
-export let dataChannel;
-export let transcriptionPC;
-export let transcriptionDataChannel;
-export let webSocket;
-export let bufferedSessionState = null;
-export let pendingCalls = {};
-export let localStream;
-export let currentQuestion = 0;
-export let questionNum = 0;
+// 受信JSONの組み立て用ラインバッファ
+let lineBuffer = [];
 
+/** Start ボタンから呼ぶ */
 export async function startSession() {
-  const overlay = document.getElementById('overlay');
-  const btnStart = document.getElementById('btnStart');
-
-  overlay.classList.remove("hidden");
-  btnStart.disabled = true;
+  const overlay = document.getElementById("overlay");
+  const btnStart = document.getElementById("btnStart");
+  if (overlay) overlay.classList.remove("hidden");
+  if (btnStart) btnStart.disabled = true;
 
   try {
-    peerConnection = new RTCPeerConnection();
-    transcriptionPC = new RTCPeerConnection();
+    const wsUrl = LIVE_WS_BASE; // config.js 側で ?key=APIキー を付与しておく
+    console.log("[FRONT] WS", wsUrl);
 
-    const audioEl = document.createElement("audio");
-    audioEl.autoplay = true;
-    document.body.appendChild(audioEl);
+    liveSocket = new WebSocket(wsUrl);
+    liveSocket.binaryType = "blob"; // Blobで来ることがある
 
-    peerConnection.ontrack = (event) => {
-      // audioEl.srcObject = event.streams[0];
-      console.log("onTrack");
+    liveSocket.onopen = () => {
+      console.log("[LIVE] open");
+
+      // 初期セットアップ（camelCase & Content 形式）
+      const setup = {
+        setup: {
+          model: "models/gemini-live-2.5-flash-preview",
+          generationConfig: {
+            responseModalities: ["TEXT"],
+            temperature: 0.4,
+          },
+          systemInstruction: {
+            role: "user",
+            parts: [
+              {
+                text:
+                  "あなたはメンタルヘルス対話のアシスタントです。日本語で、やさしく短く、一度に質問は1つだけ返答してください。",
+              },
+            ],
+          },
+        },
+      };
+      liveSocket.send(JSON.stringify(setup));
     };
 
-    peerConnection.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(peerConnection.connectionState)) {
-        endSession();
+    // 受信（テキスト/Blob/ArrayBuffer全部対応 & 行ごとに組み立て）
+    liveSocket.onmessage = async (ev) => {
+      const chunkText = await toText(ev.data);
+      if (!chunkText) return;
+
+      // 1) 改行で分割して一行ずつバッファへ
+      const lines = chunkText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      for (const line of lines) {
+        lineBuffer.push(line);
+
+        // 2) ここまでの行を結合して JSON を試しにパース
+        const candidate = lineBuffer.join("\n");
+        const obj = tryParseJSON(candidate);
+
+        if (!obj) {
+          // まだJSONにならない → 次のチャンク/行を待つ
+          continue;
+        }
+
+        // JSONとして成立したので、バッファをクリアし処理へ
+        lineBuffer = [];
+        handleLiveMessage(obj);
       }
     };
 
-    transcriptionPC.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(transcriptionPC.connectionState)) {
-        endSession();
-      }
+    liveSocket.onerror = (e) => {
+      console.error("[LIVE] error", e);
+      alert("Live API WebSocket エラーが発生しました");
     };
 
-    const dummyTrack = createDummyAudioTrack();
-    peerConnection.addTrack(dummyTrack, new MediaStream([dummyTrack]));
-    // transcriptionPC.addTrack(dummyTrack, new MediaStream([dummyTrack]));
-
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    localStream.getTracks().forEach(track => transcriptionPC.addTrack(track, localStream));
-    // localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-    dataChannel = peerConnection.createDataChannel("oai-events");
-    transcriptionDataChannel = transcriptionPC.createDataChannel("oai-events");
-
-    const webSocketPromise = setupWebSocket();
-
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-
-    const sdpResp = await fetch(PROXY_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: offer.sdp
-    });
-
-    const answerSdp = await sdpResp.text();
-    await peerConnection.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-    const transcriptOffer = await transcriptionPC.createOffer();
-    await transcriptionPC.setLocalDescription(transcriptOffer);
-
-    const resp = await fetch(TRANSCRIPT_PROXY_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: transcriptOffer.sdp,
-    });
-
-    const answer = await resp.text();
-    await transcriptionPC.setRemoteDescription({ type: "answer", sdp: answer });
-
-    await Promise.all([
-      waitForConnectionState(peerConnection),
-      waitForConnectionState(transcriptionPC),
-      waitForDataChannelOpen(dataChannel),
-      waitForDataChannelOpen(transcriptionDataChannel),
-      webSocketPromise
-    ]);
-
-    dataChannel.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        console.log("[DataChannel]", msg);
-      } catch (err) {
-        console.error("Invalid DataChannel message:", event.data);
-      }
-    };
-    transcriptionDataChannel.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        console.log("[DataChannel]", msg);
-      } catch (err) {
-        console.error("Invalid DataChannel message:", event.data);
-      }
+    liveSocket.onclose = (ev) => {
+      console.log("[LIVE] close", { code: ev.code, reason: ev.reason });
+      ready = false;
+      liveSocket = null;
+      lineBuffer = [];
+      if (btnStart) btnStart.disabled = false;
     };
 
-    if(getBufferedSessionState()) 
-      await restoreConversationHistory(getBufferedSessionState());
-
-    overlay.classList.add("hidden");
-    startConversation();
-  } catch (error) {
-    console.error("セッション開始中にエラー:", error);
-    alert("接続に失敗しました。もう一度お試しください。");
-    overlay.classList.add("hidden");
-    btnStart.disabled = false;
+    if (overlay) overlay.classList.add("hidden");
+  } catch (err) {
+    console.error("セッション開始エラー:", err);
+    alert(err.message || "接続に失敗しました");
+    if (overlay) overlay.classList.add("hidden");
+    if (btnStart) btnStart.disabled = false;
     endSession();
   }
 }
 
+/** 終了 */
 export function endSession() {
-  const sessionId = localStorage.getItem("session_id");
+  try {
+    if (liveSocket && liveSocket.readyState === WebSocket.OPEN) liveSocket.close();
+  } catch {}
+  liveSocket = null;
+  ready = false;
+  lineBuffer = [];
+}
 
-  if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-    webSocket.send(JSON.stringify({
-      type: "end_session",
-      session_id: sessionId
-    }));
+/** UI から呼ぶ：ユーザーの入力を送信 */
+export function sendUserText(text) {
+  if (!text || !text.trim()) return;
+  appendUserText(text);
+  if (!liveSocket || liveSocket.readyState !== WebSocket.OPEN) {
+    alert("未接続です。Start を押してください。");
+    return;
+  }
+  if (!ready) {
+    // setup 完了直後に送られた場合の保険
+    setTimeout(() => _sendUserTextNow(text), 200);
+    return;
+  }
+  _sendUserTextNow(text);
+}
+
+/** 実送信（camelCase） */
+function _sendUserTextNow(text) {
+  const payload = {
+    clientContent: {
+      turns: [
+        {
+          role: "user",
+          parts: [{ text }],
+        },
+      ],
+      turnComplete: true,
+    },
+  };
+  liveSocket?.send(JSON.stringify(payload));
+  console.log("[LIVE][send]", text);
+}
+
+window.sendToGemini = (t) => sendUserText(t);
+
+/* ================= ヘルパー ================= */
+
+async function toText(data) {
+  try {
+    if (typeof data === "string") return data;
+    if (data instanceof Blob) return await data.text();
+    if (data instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(data);
+  } catch {
+    // 変換できないものは無視
+  }
+  console.log("[LIVE][raw]", data);
+  return "";
+}
+
+function tryParseJSON(s) {
+  try {
+    if (!s) return null;
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/** Live API からの1件のメッセージ(JSON)を処理 */
+function handleLiveMessage(msg) {
+  // setup 完了（setupComplete または最初の serverContent）
+  if (!ready && (msg.setupComplete || msg.serverContent)) {
+    ready = true;
+    console.log("[LIVE] ready");
+    _sendUserTextNow("こんにちは。私は準備できています。あなたの体調について簡単に教えてください。");
+    return;
   }
 
-  if (localStream) localStream.getTracks().forEach(track => track.stop());
-  if (dataChannel) dataChannel.close();
-  if (webSocket) webSocket.close();
-  if (peerConnection) peerConnection.close();
-
-  document.getElementById('btnStart').disabled = false;
-  document.getElementById('overlay').classList.add("hidden");
-
-  localStorage.removeItem("session_id");
-}
-
-
-export function getQuestionNum() {
-  return questionNum;
-}
-
-export function setQuestionNum(value) {
-  questionNum = value;
-}
-
-export function getCurrentQuestion() {
-  return currentQuestion;
-}
-
-export function setCurrentQuestion(value) {
-  currentQuestion = value;
-}
-
-export function getBufferedSessionState() {
-  return bufferedSessionState;
-}
-
-export function setBufferedSessionState(state) {
-  bufferedSessionState = state;
+  // モデル返答（TEXT）
+  const parts = msg?.serverContent?.modelTurn?.parts || [];
+  const texts = parts.map((p) => p.text).filter(Boolean);
+  if (texts.length) {
+    const text = texts.join("\n");
+    appendAssistantText(text);
+    playTextAsAudio(text).catch((e) => console.warn("TTS failed:", e));
+  }
 }
