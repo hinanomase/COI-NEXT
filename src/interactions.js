@@ -3,17 +3,31 @@ import { webSocket } from './websocket.js';
 import { playAudioBlob } from './audio.js';
 import { TTS_ENDPOINT } from './config.js';
 import {
-  sendToGemini,
-  primeOneSentenceReaction,
+  // sendToGemini,
+  // primeOneSentenceReaction,
   awaitUtteranceEnd,
   awaitStableTranscript,
-  suspendRealtimeInput,
-  resumeRealtimeInput,
+  // suspendRealtimeInput,
+  // resumeRealtimeInput,
   beginUserTurn,
   getLastUtterMs,
 } from './session.js';
 
 let lastQuestion = "";
+
+export async function getInstruction() {
+  return new Promise((resolve) => {
+    const onMessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "instruction") {
+        webSocket.removeEventListener("message", onMessage);
+        resolve(msg.instruction || "");
+      }
+    };
+    webSocket.addEventListener("message", onMessage);
+    webSocket.send(JSON.stringify({ type: "get_instruction" }));
+  });
+}
 
 export function fetchQuestion() {
   return new Promise((resolve) => {

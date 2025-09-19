@@ -14,7 +14,7 @@ class SetAgent {
     this.init();
   }
 
-  init() {
+  init(onLoaded) {
     const requiredScripts = [
       "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js",
       "https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js",
@@ -24,6 +24,7 @@ class SetAgent {
       if (i >= requiredScripts.length) {
         this.indexLibrary = new IndexLibrary(this.debug, this.serverURL, this.modelPathPath, this.position, this.canvasId);
         this.indexLibrary.onload();
+        if (typeof onLoaded === "function") onLoaded(); // ロード完了時コールバック
         return;
       }
       $.getScript(requiredScripts[i], () => loadNext(i + 1));

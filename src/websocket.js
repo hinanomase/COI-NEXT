@@ -3,7 +3,7 @@
  */
 
 import { WEBSOCKET_ENDPOINT } from './config.js';
-import { pendingCalls, setBufferedSessionState, setCurrentQuestion, setQuestionNum } from './session.js';
+import { endSession, pendingCalls, setBufferedSessionState, setCurrentQuestion, setQuestionNum } from './session.js';
 
 export let webSocket;
 let advicePromptResolver = null;
@@ -56,6 +56,10 @@ export function setupWebSocket() {
           setQuestionNum(msg.state.questions?.length || 0);
           break;
 
+        case "instruction":
+          console.log("指示プロンプト: ", msg.instruction);
+          break;
+
         case "question":
           console.log("次の質問:", msg.text);
           break;
@@ -79,6 +83,7 @@ export function setupWebSocket() {
         case "session_timeout":
           console.log(msg.message);
           alert(msg.message);
+          endSession();
           break;
 
         case "error":

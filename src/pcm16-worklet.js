@@ -32,6 +32,7 @@ class PCM16WorkletProcessor extends AudioWorkletProcessor {
 
     // 100ms単位で送る（ネイティブレートのまま）
     this.chunkSamples = Math.round(this.inRate / 10);
+    console.log("[Worklet] PCM16WorkletProcessor initialized. inRate:", this.inRate);
   }
 
   _pushPre(v) {
@@ -65,14 +66,16 @@ class PCM16WorkletProcessor extends AudioWorkletProcessor {
       const s = Math.max(-1, Math.min(1, this.lpfY));
 
       // VAD
+      const prevInSpeech = this.inSpeech;
       this.energyMA = (1 - this.alpha) * this.energyMA + this.alpha * Math.abs(s);
       if (!this.inSpeech && this.energyMA > this.thHi) {
         this.inSpeech = true;
         this.silentSamples = 0;
         this.utterSamples = 0;
-        // ★この時点でプレロールを固定
         this.pendingPre = this._snapshotPre();
         this.port.postMessage({ type: "vad", state: "start" });
+        // デバッグ出力
+        console.log("[Worklet][VAD] start, energyMA:", this.energyMA);
       }
       if (this.inSpeech) {
         if (this.energyMA < this.thLo) {
@@ -81,6 +84,8 @@ class PCM16WorkletProcessor extends AudioWorkletProcessor {
             this.inSpeech = false;
             const utterMs = Math.round(this.utterSamples * 1000 / this.inRate);
             this.port.postMessage({ type: "vad", state: "end", utterMs });
+            // デバッグ出力
+            console.log("[Worklet][VAD] end, utterMs:", utterMs);
           }
         } else {
           this.silentSamples = 0;
@@ -111,6 +116,8 @@ class PCM16WorkletProcessor extends AudioWorkletProcessor {
         { type: "audio", rate: this.inRate, samples: payload.buffer },
         [payload.buffer]
       );
+      // デバッグ出力
+      // console.log("[Worklet][AUDIO] chunk sent, samples:", payload.length);
     }
     return true;
   }
