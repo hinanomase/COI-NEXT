@@ -1,13 +1,13 @@
-/* 画面全体を上下で2分割 */
+
 #app {
   height: 100vh;
   display: grid;
   grid-template-rows: 1fr 1fr; /* 上下半分ずつ */
 }
 
-/* ── 上半分 ───────────────────────── */
+
 #top {
-  background: #0b0f19; /* 任意：少し暗めでエージェントを映えさせる */
+  background: #0b0f19; 
   display: flex;
   align-items: center;
   justify-content: center;
@@ -44,7 +44,7 @@
   display: block;
 }
 
-/* ボタン（左右） */
+
 .circle-btn {
   border: none;
   border-radius: 999px;
@@ -64,10 +64,10 @@
   padding: 14px 24px;
 }
 
-/* Stopは赤系 */
+
 #btnStop { background: #e74c3c; }
 
-/* ── 下半分（動画＋ランドマークを大きく） ─── */
+
 #bottom {
   background: #000;
   position: relative;
@@ -85,7 +85,7 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover; /* 画面いっぱいに拡大 */
+  object-fit: cover; 
 }
 
 /* レスポンシブ微調整（幅が狭い時はボタンを少し小さく） */
