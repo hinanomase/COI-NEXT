@@ -1,31 +1,100 @@
-/* 右下プレビューのラッパ */
-#mpPreviewWrap {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: 320px;   /* 必要に応じて調整可 */
-  height: 240px;  /* 必要に応じて調整可 */
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0,0,0,.25);
-  z-index: 1000;
+/* 画面全体を上下で2分割 */
+#app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr 1fr; /* 上下半分ずつ */
 }
 
-/* 中のvideoとcanvasをピッタリ重ねる */
+/* ── 上半分 ───────────────────────── */
+#top {
+  background: #0b0f19; /* 任意：少し暗めでエージェントを映えさせる */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+#topGrid {
+  width: min(1200px, 92vw);
+  height: 100%;
+  display: grid;
+  grid-template-columns: 160px 1fr 160px; /* 左ボタン / 中央エージェント / 右ボタン */
+  gap: 16px;
+  align-items: center; /* 垂直中央寄せ */
+}
+
+#topGrid .side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#topGrid .center {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#myCanvas1 {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  max-width: 100%;
+  display: block;
+}
+
+/* ボタン（左右） */
+.circle-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #2d7ff9;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  transition: transform .05s ease, opacity .2s ease;
+}
+.circle-btn:hover { transform: translateY(-1px); }
+.circle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.circle-btn.large {
+  font-size: 18px;
+  padding: 14px 24px;
+}
+
+/* Stopは赤系 */
+#btnStop { background: #e74c3c; }
+
+/* ── 下半分（動画＋ランドマークを大きく） ─── */
+#bottom {
+  background: #000;
+  position: relative;
+  overflow: hidden;
+}
+
+#mpPreviewWrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
 #mpPreview, #mpOverlay {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: cover; /* 画面いっぱいに拡大 */
 }
 
-
-/* 既存: エージェントCanvasはそのまま */
-#myCanvas1 {
-  height: 300px;
-  max-width: 100%;
-  display: block;
+/* レスポンシブ微調整（幅が狭い時はボタンを少し小さく） */
+@media (max-width: 640px) {
+  #topGrid {
+    grid-template-columns: 120px 1fr 120px;
+  }
+  .circle-btn.large {
+    font-size: 16px;
+    padding: 12px 18px;
+  }
 }
-
-/* 会話UI関連（chat-container等）は削除可） */
