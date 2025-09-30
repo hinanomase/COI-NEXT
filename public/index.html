@@ -1,32 +1,27 @@
+<!-- public/index.html -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Voice Chat Demo</title>
+  <title>Eye Capture</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="chat-container" id="chatContainer"></div>
-
   <div class="controls-container">
-    <button id="btnStart" class="circle-btn">Start</button>
-    <canvas id="myCanvas1"></canvas>
-    <button id="btnMic" class="circle-btn" disabled>Mic</button>
-  </div>
-  
+  <button id="btnStart" class="circle-btn">Start</button>
+  <button id="btnStop" class="circle-btn">Stop</button>
+  <canvas id="myCanvas1"></canvas>
+</div>
 
-  <div id="overlay" class="overlay hidden">
-    <div class="overlay-content">
-      <span class="spinner"></span>
-      <p>接続中...</p>
-    </div>
-  </div>
+  
+<div id="mpPreviewWrap">
+  <video id="mpPreview" autoplay playsinline muted></video>
+  <canvas id="mpOverlay"></canvas>
+</div>
 
 
   <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
-  <!-- <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script> -->
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
   <script type="module" src="scripts/mediapipe.js"></script>
   <script type="module" src="scripts/main.js"></script>
