@@ -1,100 +1,162 @@
+/* ========== Base ========== */
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans",
+               "Noto Sans JP", "Helvetica Neue", Arial, "Apple Color Emoji",
+               "Segoe UI Emoji", "Segoe UI Symbol";
+  background: #0a0d14;
+  color: #e6e9ef;
+}
+button { font: inherit; }
 
+/* === App を5行グリッド化：上スペーサー / TOP / 仕切り / BOTTOM / 下スペーサー === */
 #app {
   height: 100vh;
   display: grid;
-  grid-template-rows: 1fr 1fr; /* 上下半分ずつ */
+  --topH: 50vh;     /* 上段の固定高さ（必要に応じて変更可） */
+  --bottomH: 50vh;  /* 開いているときの下段高さ */
+  grid-template-rows: 1fr var(--topH) 28px var(--bottomH) 1fr;
+  transition: grid-template-rows .25s ease;
 }
 
+/* トグルで閉じたとき：下段を0にし、上下スペーサーで上段を中央へ */
+#app.preview-collapsed {
+  --bottomH: 0vh;
+}
 
+/* 子要素の行割り当て */
+#top { grid-row: 2; }
+#dividerToggle { grid-row: 3; }
+#bottom { grid-row: 4; }
+
+/* ========== Top: Agent + Buttons ========== */
 #top {
-  background: #0b0f19; 
+  background: #0b0f19;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 12px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  min-height: 0;
 }
-
 #topGrid {
   width: min(1200px, 92vw);
   height: 100%;
   display: grid;
-  grid-template-columns: 160px 1fr 160px; /* 左ボタン / 中央エージェント / 右ボタン */
+  grid-template-columns: 160px 1fr 160px;
   gap: 16px;
-  align-items: center; /* 垂直中央寄せ */
-}
-
-#topGrid .side {
-  display: flex;
   align-items: center;
-  justify-content: center;
+  min-height: 0;
 }
+#topGrid .side { display: flex; align-items: center; justify-content: center; }
+#topGrid .center { height: 100%; display: flex; align-items: center; justify-content: center; min-height: 0; }
 
-#topGrid .center {
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
+/* Agent Canvas */
 #myCanvas1 {
   width: 100%;
   height: 100%;
-  max-height: 100%;
   max-width: 100%;
+  max-height: 100%;
   display: block;
+  background: transparent;
 }
 
-
+/* Buttons */
 .circle-btn {
   border: none;
   border-radius: 999px;
   padding: 10px 16px;
   background: #2d7ff9;
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: .02em;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(0,0,0,.25);
-  transition: transform .05s ease, opacity .2s ease;
+  transition: transform .05s ease, opacity .2s ease, filter .2s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .circle-btn:hover { transform: translateY(-1px); }
-.circle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.circle-btn.large {
-  font-size: 18px;
-  padding: 14px 24px;
-}
-
-
+.circle-btn:active { transform: translateY(0); filter: brightness(.96); }
+.circle-btn:disabled { opacity: .5; cursor: not-allowed; }
+.circle-btn.large { font-size: 18px; padding: 14px 24px; }
 #btnStop { background: #e74c3c; }
 
+/* ========== Divider Toggle（仕切り） ========== */
+#dividerToggle {
+  display: flex; align-items: center; justify-content: center;
+  background: #121722;
+  border-top: 1px solid rgba(255,255,255,.06);
+  border-bottom: 1px solid rgba(0,0,0,.4);
+  cursor: ns-resize;
+  user-select: none;
+}
+#dividerToggle:focus { outline: 2px solid #2d7ff9; outline-offset: -2px; }
+#dividerToggle .grip {
+  width: 64px; height: 6px; border-radius: 999px;
+  background: linear-gradient(90deg, #586079 0%, #8c95b3 100%);
+  opacity: .9;
+}
+#app.preview-collapsed #dividerToggle { background: #162034; }
 
+/* ========== Bottom: プレビュー＋座標データの2カラム ========== */
 #bottom {
   background: #000;
   position: relative;
   overflow: hidden;
 }
 
-#mpPreviewWrap {
-  position: relative;
-  width: 100%;
+#bottomGrid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;  /* 左:映像 / 右:座標 */
+  gap: 12px;
   height: 100%;
+  padding: 12px;
+  background: #080a0f;
 }
 
-#mpPreview, #mpOverlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover; 
+/* 左：映像＋ランドマーク */
+#mpPreviewWrap { position: relative; width: 100%; height: 100%; border-radius: 8px; overflow: hidden; }
+#mpPreview, #mpOverlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* 右：座標パネル */
+#dataPanel {
+  background: #0f1524;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  color: #e6e9ef;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#dataPanel header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.06);
+}
+#dataPanel h3 { margin: 0; font-size: 14px; font-weight: 700; }
+#dataPanel small { color: #9aa3b2; }
+#coordLog {
+  margin: 0;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow: auto;
+  flex: 1;
+  background: transparent;
 }
 
-/* レスポンシブ微調整（幅が狭い時はボタンを少し小さく） */
+/* ========== Responsive ========== */
+@media (max-width: 900px) {
+  #topGrid { grid-template-columns: 140px 1fr 140px; }
+  .circle-btn.large { font-size: 16px; padding: 12px 20px; }
+}
 @media (max-width: 640px) {
-  #topGrid {
-    grid-template-columns: 120px 1fr 120px;
-  }
-  .circle-btn.large {
-    font-size: 16px;
-    padding: 12px 18px;
-  }
+  #topGrid { grid-template-columns: 120px 1fr 120px; gap: 12px; }
+  .circle-btn.large { font-size: 15px; padding: 11px 18px; }
+  #bottomGrid { grid-template-columns: 1fr; grid-auto-rows: minmax(0, auto); }
+  #dataPanel { min-height: 30%; }
 }

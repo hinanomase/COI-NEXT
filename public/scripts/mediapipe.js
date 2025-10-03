@@ -1,63 +1,123 @@
 // public/scripts/mediapipe.js
-import { FilesetResolver, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 import { BACKEND_URL, EYE_LANDMARKS } from "./config.js";
+import {
+  FilesetResolver,
+  FaceLandmarker
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
-let collecting = false;
+let collecting = false;     // データ収集フラグ
+let running = false;        // 推論ループ稼働フラグ（Stopでfalseに）
 let startTime = 0;
 let collectedData = [];
+
 let faceLandmarker;
 let videoEl;
-
-// ★ 追加：オーバーレイ用
 let overlayCanvas, overlayCtx;
-let renderW = 320, renderH = 240; // デフォルト（CSSと一致）
+let rafId = null;
+let stream = null;
 
 export async function mediapipeInitAndStart() {
+  // 既存ストリームが止まっていたら再準備
   await setupCamera();
   await initFaceLandmarker();
-  if (faceLandmarker) faceLandmarker.detectForVideo(videoEl, Date.now());
-  startCollecting();
-  predict();
-}
 
-function startCollecting() {
+  // 初回ウォームアップ
+  if (faceLandmarker && videoEl?.readyState >= 2) {
+    faceLandmarker.detectForVideo(videoEl, Date.now());
+  }
+
+  // フラグ類
   collectedData = [];
   startTime = performance.now();
   collecting = true;
+  running = true;
+
+  // ループ開始
+  loop();
 }
 
 export function stopCollecting() {
+  // 旧仕様の互換：収集のみ停止（プレビューは止めない）
   collecting = false;
 }
+
+/** ★完全停止：測定・イベント・プレビューすべて停止 */
+export async function stopMediaPipeAll() {
+  // 収集停止
+  collecting = false;
+
+  // ループ停止
+  running = false;
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+
+  // オーバーレイ消去
+  if (overlayCtx && overlayCanvas) {
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  }
+
+  // カメラ停止
+  if (videoEl && videoEl.srcObject) {
+    const tracks = videoEl.srcObject.getTracks();
+    tracks.forEach(t => t.stop());
+    videoEl.pause();
+    videoEl.srcObject = null;
+  }
+  stream = null;
+
+  // UI側にクリアを通知（座標パネル等を消すため）
+  window.dispatchEvent(new CustomEvent("mp:clear"));
+}
+
+/** サーバ送信（必要に応じて） */
+export async function sendEyeLandmarkData() {
+  const session_id = getOrCreateSessionId();
+  try {
+    const resp = await fetch(`${BACKEND_URL}/api/eye-landmarks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id, data: collectedData })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    console.log(`[MediaPipe] Saved ${collectedData.length} frames`);
+  } catch (e) {
+    console.error("[MediaPipe] Save failed", e);
+  }
+}
+
+/* ===== 内部処理 ===== */
 
 async function setupCamera() {
   videoEl = document.getElementById("mpPreview");
   overlayCanvas = document.getElementById("mpOverlay");
   overlayCtx = overlayCanvas.getContext("2d");
 
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  // もし前回のストリームが残っていたら一旦止める
+  if (videoEl?.srcObject) {
+    try {
+      videoEl.srcObject.getTracks().forEach(t => t.stop());
+    } catch {}
+    videoEl.srcObject = null;
+  }
+
+  stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
   videoEl.srcObject = stream;
   await videoEl.play();
 
-  // 動的に実サイズを反映（メタデータ読み込み後に取得できる）
   const applySize = () => {
-    const vw = videoEl.videoWidth || renderW;
-    const vh = videoEl.videoHeight || renderH;
-    // 表示はCSSでスケーリングしているので、内部解像度だけ合わせる
+    const vw = videoEl.videoWidth || 640;
+    const vh = videoEl.videoHeight || 360;
     overlayCanvas.width = vw;
     overlayCanvas.height = vh;
-    renderW = vw;
-    renderH = vh;
   };
-
-  if (videoEl.readyState >= 2) {
-    applySize();
-  } else {
-    videoEl.addEventListener("loadedmetadata", applySize, { once: true });
-  }
+  if (videoEl.readyState >= 2) applySize();
+  else videoEl.addEventListener("loadedmetadata", applySize, { once: true });
 }
 
 async function initFaceLandmarker() {
+  if (faceLandmarker) return; // 1回だけロード
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
   );
@@ -73,83 +133,56 @@ async function initFaceLandmarker() {
   console.log("[MediaPipe] FaceLandmarker ready");
 }
 
-function predict() {
-  if (!faceLandmarker) {
-    requestAnimationFrame(predict);
-    return;
-  }
-  const now = Date.now();
-  const result = faceLandmarker.detectForVideo(videoEl, now);
+function loop() {
+  if (!running) return;
 
-  // ★ 追加：毎フレームCanvasをクリア
+  const now = Date.now();
+  const result = faceLandmarker?.detectForVideo(videoEl, now);
+
+  // 描画クリア
   overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-  if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+  if (result?.faceLandmarks?.length > 0) {
     const landmarks = result.faceLandmarks[0];
 
-    // ★ 追加：目のランドマークを描画（点）
+    // 目ランドマークを描画
     drawEyeLandmarks(landmarks);
 
+    // UI更新用イベント（目の座標のみ）
+    const eye = EYE_LANDMARKS.map(idx => {
+      const p = landmarks[idx];
+      return { idx, x: +(p.x).toFixed(4), y: +(p.y).toFixed(4), z: +(p.z ?? 0).toFixed(4) };
+    });
+    // running が true の間だけ送信（Stop で止まる）
+    window.dispatchEvent(new CustomEvent("mp:eye_frame", {
+      detail: { ts: now, count: eye.length, eye }
+    }));
+
+    // 記録
     if (collecting) {
-      const eye = EYE_LANDMARKS.map(idx => landmarks[idx]);
       const elapsed = performance.now() - startTime;
-      collectedData.push({ elapsed, eyeLandmarks: eye });
+      collectedData.push({ elapsed, eyeLandmarks: EYE_LANDMARKS.map(i => landmarks[i]) });
     }
   }
 
-  requestAnimationFrame(predict);
+  rafId = requestAnimationFrame(loop);
 }
 
-// ★ 追加：目ランドマークを点で描画
 function drawEyeLandmarks(landmarks) {
   overlayCtx.save();
   overlayCtx.lineWidth = 2;
   overlayCtx.globalAlpha = 0.95;
 
-  // 目だけ強調（小さな円）
   overlayCtx.beginPath();
   for (const idx of EYE_LANDMARKS) {
-    const p = landmarks[idx]; // {x,y,z}
+    const p = landmarks[idx];
     const x = p.x * overlayCanvas.width;
     const y = p.y * overlayCanvas.height;
     overlayCtx.moveTo(x + 2, y);
     overlayCtx.arc(x, y, 2, 0, Math.PI * 2);
   }
-  overlayCtx.stroke(); // 色はデフォルト（CSSや環境依存）※色を指定したい場合は strokeStyle を設定
-  overlayCtx.restore();
-
-  // 任意：目の外周を軽く結ぶ（視認性アップ）
-  // connectSequence(landmarks, [33, 160, 158, 133, 153, 145, 144, 33]);  // 左目 周辺
-  // connectSequence(landmarks, [263, 387, 385, 362, 380, 374, 373, 263]); // 右目 周辺
-}
-
-function connectSequence(landmarks, seq) {
-  overlayCtx.save();
-  overlayCtx.beginPath();
-  for (let i = 0; i < seq.length; i++) {
-    const p = landmarks[seq[i]];
-    const x = p.x * overlayCanvas.width;
-    const y = p.y * overlayCanvas.height;
-    if (i === 0) overlayCtx.moveTo(x, y);
-    else overlayCtx.lineTo(x, y);
-  }
   overlayCtx.stroke();
   overlayCtx.restore();
-}
-
-export async function sendEyeLandmarkData() {
-  const session_id = getOrCreateSessionId();
-  try {
-    const resp = await fetch(`${BACKEND_URL}/api/eye-landmarks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id, data: collectedData })
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    console.log(`[MediaPipe] Saved ${collectedData.length} frames`);
-  } catch (e) {
-    console.error("[MediaPipe] Save failed", e);
-  }
 }
 
 function getOrCreateSessionId() {

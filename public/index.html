@@ -2,44 +2,64 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>Eye Capture</title>
+  <title>Eye Capture System</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="styles.css" />
 </head>
+<!-- アプリ用スクリプト -->
+<script type="module" src="scripts/config.js"></script>
+<script type="module" src="scripts/agent.js"></script>   <!-- ★ 追加 -->
+<script type="module" src="scripts/mediapipe.js"></script>
+<script type="module" src="scripts/main.js"></script>
+
 <body>
   <div id="app">
 
-
+    <!-- 上半分：エージェント＋左右ボタン -->
     <section id="top">
       <div id="topGrid">
         <div class="side left">
           <button id="btnStart" class="circle-btn large">Start</button>
         </div>
-
         <div class="center">
           <canvas id="myCanvas1"></canvas>
         </div>
-
         <div class="side right">
           <button id="btnStop" class="circle-btn large" disabled>Stop</button>
         </div>
       </div>
     </section>
 
+    <!-- 仕切りトグル（クリック/Enter/Spaceで上下切替） -->
+    <div id="dividerToggle" role="button" tabindex="0" aria-expanded="true" aria-label="プレビュー領域の表示切替">
+      <span class="grip" aria-hidden="true"></span>
+    </div>
+
+    <!-- 下半分：MediaPipeプレビュー（動画＋ランドマーク） -->
     <section id="bottom">
-      <div id="mpPreviewWrap">
-        <video id="mpPreview" autoplay playsinline muted></video>
-        <canvas id="mpOverlay"></canvas>
-      </div>
-    </section>
+  <div id="bottomGrid">
+    <!-- 左：カメラ映像＋ランドマーク -->
+    <div id="mpPreviewWrap">
+      <video id="mpPreview" autoplay playsinline muted></video>
+      <canvas id="mpOverlay"></canvas>
+    </div>
+
+    <!-- 右：座標データ -->
+    <aside id="dataPanel" aria-label="MediaPipe 取得座標">
+      <header>
+        <h3>取得座標</h3>
+        <small id="frameInfo">—</small>
+      </header>
+      <pre id="coordLog" class="log"></pre>
+    </aside>
+  </div>
+</section>
+
 
   </div>
 
-
+  <!-- スクリプト -->
   <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
-  <script type="module" src="scripts/config.js"></script>
-  <script type="module" src="scripts/mediapipe.js"></script>
-  <script type="module" src="scripts/main.js"></script>
 </body>
 </html>
