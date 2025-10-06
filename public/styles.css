@@ -68,23 +68,34 @@ button { font: inherit; }
 
 /* Wrapper that enforces a square display area regardless of available width/height. */
 .canvas-square {
-  width: 100%;
-  /* Use aspect-ratio where supported */
+  /* keep aspect ratio behavior */
   aspect-ratio: 1 / 1;
-  /* Fallback for browsers without aspect-ratio: use padding-top trick */
+
+  /* ensure it never grows beyond its parent's content box */
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+
+  /* make it a positioned container for the absolutely positioned canvas */
   position: relative;
+
+  /* ensure it is centered by its flex parent (.center already centers) */
+  display: block;
+  box-sizing: border-box;
 }
 .canvas-square::before {
   content: "";
   display: block;
-  padding-top: 100%; /* forces height = width */
-  /* This pseudo element only provides intrinsic aspect; the canvas is positioned absolutely */
+  padding-top: 100%; /* fallback to preserve square when aspect-ratio not supported */
+  /* Important: padding-top no longer forces overflow because of max-height above */
 }
+/* ensure canvas fills the square container and scales visually (object-fit preserved) */
 .canvas-square > canvas {
   position: absolute;
-  inset: 0; /* fill the wrapper */
+  inset: 0;
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 /* Buttons */
