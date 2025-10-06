@@ -16,7 +16,10 @@
           <button id="btnStart" class="circle-btn large">Start</button>
         </div>
         <div class="center">
-          <canvas id="myCanvas1"></canvas>
+          <!-- square wrapper keeps a stable 1:1 display aspect regardless of parent resizing -->
+          <div class="canvas-square">
+            <canvas id="myCanvas1" width="1000" height="1000"></canvas>
+          </div>
         </div>
         <div class="side right">
           <button id="btnStop" class="circle-btn large" disabled>Stop</button>
@@ -44,6 +47,7 @@
             <h3>取得座標</h3>
             <small id="frameInfo">—</small>
             <small id="openInfo" style="margin-left:8px;color:#9fe29f;">Open: —%</small>
+            <small id="closedInfo" aria-hidden="true" class="closed-badge">閉眼</small>
           </header>
           <pre id="coordLog" class="log"></pre>
         </aside>

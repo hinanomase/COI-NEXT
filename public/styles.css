@@ -55,12 +55,36 @@ button { font: inherit; }
 
 /* Agent Canvas */
 #myCanvas1 {
+  /* 内部解像度は canvas の属性で固定（例: 1000x1000）しているので、
+     見た目はアスペクト比を保って縮小表示する */
+  /* 親（.canvas-square）に合わせてカバーさせる。内部の描画解像度は
+     width/height 属性で固定されているため、CSS の stretch は見た目のみ影響します */
   width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
   display: block;
+  object-fit: contain; /* 保持して中央へ */
   background: transparent;
+}
+
+/* Wrapper that enforces a square display area regardless of available width/height. */
+.canvas-square {
+  width: 100%;
+  /* Use aspect-ratio where supported */
+  aspect-ratio: 1 / 1;
+  /* Fallback for browsers without aspect-ratio: use padding-top trick */
+  position: relative;
+}
+.canvas-square::before {
+  content: "";
+  display: block;
+  padding-top: 100%; /* forces height = width */
+  /* This pseudo element only provides intrinsic aspect; the canvas is positioned absolutely */
+}
+.canvas-square > canvas {
+  position: absolute;
+  inset: 0; /* fill the wrapper */
+  width: 100%;
+  height: 100%;
 }
 
 /* Buttons */
@@ -159,4 +183,34 @@ button { font: inherit; }
   .circle-btn.large { font-size: 15px; padding: 11px 18px; }
   #bottomGrid { grid-template-columns: 1fr; grid-auto-rows: minmax(0, auto); }
   #dataPanel { min-height: 30%; }
+}
+
+/* ========== Eyes Closed Badge ========== */
+.closed-badge {
+  margin-left: 8px;
+  font-weight: 800;
+  color: #fff;
+  opacity: 0;
+  transform: translateY(-1px) scale(.98);
+  transition: opacity .18s ease, transform .18s ease, color .18s, box-shadow .18s;
+  font-size: 13px;
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.eyes-closed .closed-badge {
+  opacity: 1;
+  color: #ffffff;
+  background: linear-gradient(180deg, #ff5b5b 0%, #ff2e2e 100%);
+  border-color: rgba(255,46,46,0.95);
+  transform: translateY(0) scale(1.02);
+  box-shadow: 0 8px 22px rgba(255,46,46,0.18), inset 0 -3px 8px rgba(0,0,0,0.12);
+  animation: pulseBadge 1.8s infinite ease-in-out;
+}
+
+@keyframes pulseBadge {
+  0% { box-shadow: 0 6px 16px rgba(255,46,46,0.18); transform: translateY(0) scale(1.00); }
+  50% { box-shadow: 0 10px 28px rgba(255,46,46,0.22); transform: translateY(-1px) scale(1.03); }
+  100% { box-shadow: 0 6px 16px rgba(255,46,46,0.18); transform: translateY(0) scale(1.00); }
 }

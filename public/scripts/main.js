@@ -5,7 +5,7 @@ import {
   stopCollecting,
   stopMediaPipeAll
 } from "./mediapipe.js";
-
+// import { Agent } from "./agent.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
 
 // agent.js は動的 import で安全に初期化
@@ -24,7 +24,7 @@ async function initAgentSafely(canvas) {
 document.addEventListener("DOMContentLoaded", async () => {
   // エージェント初期化（失敗しても他は動く）
   const canvas = document.getElementById("myCanvas1");
-  await initAgentSafely(canvas);
+  // await initAgentSafely(canvas);
 
   const app      = document.getElementById("app");
   const btnStart = document.getElementById("btnStart");
@@ -92,6 +92,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       const alpha = 0.25;
       emaOpen = (emaOpen == null) ? openPctRaw : (alpha*openPctRaw + (1-alpha)*emaOpen);
       if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
+
+      // ここで「閉眼」閾値（20%）を判定してクラスを切り替える
+      const closed = (emaOpen != null && emaOpen < 50);
+      document.body.classList.toggle("eyes-closed", closed);
     }
 
     // 2) データ表示（元のランドマーク一覧）
