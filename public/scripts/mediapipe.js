@@ -169,19 +169,39 @@ function loop() {
 }
 
 function drawEyeLandmarks(landmarks) {
+  if (!overlayCtx || !overlayCanvas) return;
+
+  // Iris indices per MediaPipe
+  const IRIS_SET = new Set([468, 469, 470, 471, 472, 473, 474, 475, 476, 477]);
+
   overlayCtx.save();
-  overlayCtx.lineWidth = 2;
   overlayCtx.globalAlpha = 0.95;
 
-  overlayCtx.beginPath();
+  // point size scales with canvas short side
+  const shortSide = Math.min(overlayCanvas.width, overlayCanvas.height) || 320;
+  const pointSize = Math.max(1, Math.round(shortSide * 0.005));
+  overlayCtx.lineWidth = Math.max(1, Math.round(pointSize / 2));
+
+  const contourColor = "#00ff08ff"; // cyan-ish for eye contour
+  const irisColor = "#ff03d5ff";    // amber for iris
+
   for (const idx of EYE_LANDMARKS) {
     const p = landmarks[idx];
-    const x = p.x * overlayCanvas.width;
-    const y = p.y * overlayCanvas.height;
-    overlayCtx.moveTo(x + 2, y);
-    overlayCtx.arc(x, y, 2, 0, Math.PI * 2);
+    const x = Math.round(p.x * overlayCanvas.width);
+    const y = Math.round(p.y * overlayCanvas.height);
+
+    const color = IRIS_SET.has(idx) ? irisColor : contourColor;
+
+    // draw each point individually so styles don't bleed between points
+    overlayCtx.beginPath();
+    overlayCtx.fillStyle = color;
+    overlayCtx.strokeStyle = color; // match outline and fill
+    const radius = Math.max(1, Math.round(pointSize / 2));
+    overlayCtx.arc(x, y, radius, 0, Math.PI * 2);
+    overlayCtx.fill();
+    overlayCtx.stroke();
   }
-  overlayCtx.stroke();
+
   overlayCtx.restore();
 }
 

@@ -94,7 +94,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
 
       // ここで「閉眼」閾値（20%）を判定してクラスを切り替える
-      const closed = (emaOpen != null && emaOpen < 50);
+      const closed = (emaOpen != null && emaOpen < 20);
       document.body.classList.toggle("eyes-closed", closed);
     }
 
