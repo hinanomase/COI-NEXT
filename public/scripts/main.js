@@ -84,16 +84,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.addEventListener("mp:eye_frame", (e) => {
     const { ts, count, eye } = e.detail;
 
-    // 1) 開眼率（EAR / baseline）
-    if (calib?.openBaseline?.avg) {
+    // 1) 開眼率（EAR を閉眼/開眼ベースラインで正規化）
+    if (calib?.openBaseline?.avg && calib?.closedBaseline?.avg) {
       const ratio = computeEyeOpenRatio(eye).avg;
-      const openPctRaw = clamp((ratio / (calib.openBaseline.avg || 1e-6)) * 100, 0, 130);
+
+      // normalize: 0% = closedBaseline, 100% = openBaseline
+      const closedV = calib.closedBaseline.avg || 1e-6;
+      const openV = calib.openBaseline.avg || (closedV + 1e-6);
+      let norm = (ratio - closedV) / (openV - closedV);
+      // handle edge cases
+      if (!isFinite(norm)) norm = 0;
+      const openPctRaw = clamp(norm * 100, 0, 130);
+
       // EMAで平滑化
       const alpha = 0.25;
       emaOpen = (emaOpen == null) ? openPctRaw : (alpha*openPctRaw + (1-alpha)*emaOpen);
       if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
 
-      // ここで「閉眼」閾値（20%）を判定してクラスを切り替える
+      // 閾値判定はEMA後の値で（20%未満を閉眼とみなす）
       const closed = (emaOpen != null && emaOpen < 20);
       document.body.classList.toggle("eyes-closed", closed);
     }

@@ -8,11 +8,18 @@ export async function runCalibration() {
   const ui = buildOverlayUI(wrap);
 
   try {
-    // ========= 1) 開眼ベースライン（3秒） =========
-    setStep(ui, "開眼ベースライン", "自然に目を開けてください（3秒）");
-    await sleep(350);
-    const openSamples = await sampleEyeMetrics(3000);
-    const openBaseline = summarizeOpenBaseline(openSamples); // EARの分位トリム
+  // ========= 1) 開眼ベースライン（3秒） =========
+  setStep(ui, "開眼ベースライン", "自然に目を開けてください（3秒）");
+  await sleep(350);
+  const openSamples = await sampleEyeMetrics(3000);
+  const openBaseline = summarizeOpenBaseline(openSamples); // EARの分位トリム
+
+  // ========= 1b) 閉眼ベースライン（3秒） =========
+  // ユーザーに目を閉じてもらい、閉眼時の縦横比（完全閉眼の基準）も取る。
+  setStep(ui, "閉眼ベースライン", "目を閉じてください（3秒）");
+  await sleep(350);
+  const closedSamples = await sampleEyeMetrics(3000);
+  const closedBaseline = summarizeOpenBaseline(closedSamples);
 
     // ========= 2) 視線キャリブ（左右3点 x=0.2/0.5/0.8, y=0.5） =========
     const targets = [
@@ -43,6 +50,7 @@ export async function runCalibration() {
 
     const result = {
       openBaseline,           // {left,right,avg}
+      closedBaseline,         // {left,right,avg}
       gaze: { sx, bx, yBias }, // 水平スケール/バイアス & 垂直バイアス
       ts: Date.now(),
     };
