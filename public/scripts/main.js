@@ -2,124 +2,123 @@
 import {
   mediapipeInitAndStart,
   sendEyeLandmarkData,
-  stopCollecting,
   stopMediaPipeAll
 } from "./mediapipe.js";
-// import { Agent } from "./agent.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
 
-// agent.js は動的 import で安全に初期化
-async function initAgentSafely(canvas) {
-  try {
-    const mod = await import("./agent.js");
-    if (mod?.default) { const A = mod.default; const a = new A(canvas); if(a.init) await a.init(); if(a.start) a.start(); return; }
-    if (mod?.Agent)    { const A = mod.Agent;   const a = new A(canvas); if(a.init) await a.init(); if(a.start) a.start(); return; }
-    if (typeof mod?.initAgent === "function") { await mod.initAgent(canvas); return; }
-  } catch(e){
-    console.warn("[main] agent.js import 失敗。window.initAgent を探します。", e);
-  }
-  if (typeof window.initAgent === "function") await window.initAgent(canvas);
+document.addEventListener("DOMContentLoaded", async () => {
+  const btnToggle = document.getElementById("btnToggle");
+  const coordLog = document.getElementById("coordLog");
+  const frameInfo = document.getElementById("frameInfo");
+  const openInfo = document.getElementById("openInfo");
+  const closedInfo = document.getElementById("closedInfo");
+
+  let isRunning = false;
+  let calib = null;
+  let emaOpen = null;
+
+  // ========= Start/Stop兼用 =========
+  btnToggle.addEventListener("click", async () => {
+    if (!isRunning) {
+      // ---- Start ----
+      btnToggle.textContent = "Stop";
+      btnToggle.classList.add("active");
+      isRunning = true;
+      console.log("[Main] ▶ Start");
+
+      try {
+        await mediapipeInitAndStart(); // カメラ＋FaceLandmarker初期化
+        calib = await runCalibration(); // キャリブレーション
+      } catch (e) {
+        console.error("[Main] 起動エラー:", e);
+        alert("MediaPipeまたはカメラの初期化に失敗しました。");
+        btnToggle.textContent = "Start";
+        btnToggle.classList.remove("active");
+        isRunning = false;
+        return;
+      }
+
+    } else {
+      // ---- Stop ----
+      btnToggle.textContent = "Start";
+      btnToggle.classList.remove("active");
+      isRunning = false;
+      console.log("[Main] ■ Stop");
+
+      try {
+        await sendEyeLandmarkData(); // データ保存
+      } catch (e) {
+        console.warn("[Main] 保存スキップ:", e);
+      }
+
+      await stopMediaPipeAll(); // MediaPipe完全停止
+
+      // UIクリア
+      if (coordLog) coordLog.textContent = "";
+      if (frameInfo) frameInfo.textContent = "—";
+      if (openInfo) openInfo.textContent = "Open: —%";
+      emaOpen = null;
+    }
+  });
+
+// ===== トグル制御 =====
+const dividerToggle = document.getElementById("dividerToggle");
+const appContainer = document.getElementById("app");
+
+if (dividerToggle && appContainer) {
+  dividerToggle.addEventListener("click", () => {
+    appContainer.classList.toggle("preview-collapsed");
+  });
 }
 
-document.addEventListener("DOMContentLoaded", async () => {
-  // エージェント初期化（失敗しても他は動く）
-  const canvas = document.getElementById("myCanvas1");
-  // await initAgentSafely(canvas);
 
-  const app      = document.getElementById("app");
-  const btnStart = document.getElementById("btnStart");
-  const btnStop  = document.getElementById("btnStop");
-  const divider  = document.getElementById("dividerToggle");
 
-  const frameInfo = document.getElementById("frameInfo");
-  const openInfo  = document.getElementById("openInfo");
-  const coordLog  = document.getElementById("coordLog");
+  // ========= 毎フレーム：mp:eye_frame更新 =========
+  window.addEventListener("mp:eye_frame", (e) => {
+    const { ts, count, eye } = e.detail;
 
-  app.classList.remove("preview-collapsed");
-  divider?.setAttribute("aria-expanded", "true");
-
-  // === 状態 ===
-  let calib = null;          // { openBaseline:{avg,...}, gaze:{sx,bx,yBias}, ts }
-  let emaOpen = null;        // 開眼率表示の平滑化（指数移動平均）
-
-  // Start：推論→キャリブ（測定は継続）
-  btnStart.onclick = async () => {
-    btnStart.disabled = true;
-    btnStop.disabled  = false;
-    try {
-      await mediapipeInitAndStart();
-      calib = await runCalibration();
-    } catch (e) {
-      console.error("[main] 起動/キャリブ失敗:", e);
-      alert("起動またはキャリブに失敗しました。カメラ/権限をご確認ください。");
-      btnStart.disabled = false;
-      btnStop.disabled  = true;
+    if (calib?.openBaseline?.avg && calib?.closedBaseline?.avg) {
+      const ratio = computeEyeOpenRatio(eye).avg;
+      const closedV = calib.closedBaseline.avg || 1e-6;
+      const openV = calib.openBaseline.avg || (closedV + 1e-6);
+      let norm = (ratio - closedV) / (openV - closedV);
+      if (!isFinite(norm)) norm = 0;
+      const openPctRaw = clamp(norm * 100, 0, 130);
+      const alpha = 0.25;
+      emaOpen =
+        emaOpen == null
+          ? openPctRaw
+          : alpha * openPctRaw + (1 - alpha) * emaOpen;
+      if (openInfo)
+        openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
+      const closed = emaOpen != null && emaOpen < 20;
+      closedInfo.setAttribute("aria-hidden", closed ? "false" : "true");
     }
-  };
 
-  // Stop：完全停止（描画/イベント/プレビューも止める）
-  btnStop.onclick = async () => {
-    btnStop.disabled  = true;
-    btnStart.disabled = false;
-    stopCollecting();
-    await sendEyeLandmarkData().catch(()=>{});
-    await stopMediaPipeAll();
+    // 座標ログ出力
+    const lines = eye.map(
+      (p) => `#${p.idx}\tx:${p.x}\ty:${p.y}\tz:${p.z}`
+    );
+    if (coordLog) {
+      coordLog.textContent = lines.join("\n");
+      coordLog.scrollTop = coordLog.scrollHeight;
+    }
+    if (frameInfo)
+      frameInfo.textContent = `pts:${count} | ${new Date(ts).toLocaleTimeString()}`;
+  });
+
+  // MediaPipe停止通知
+  window.addEventListener("mp:clear", () => {
     if (coordLog) coordLog.textContent = "";
     if (frameInfo) frameInfo.textContent = "—";
     if (openInfo) openInfo.textContent = "Open: —%";
     emaOpen = null;
-  };
-
-  // 仕切り（UIのみ畳む）
-  const togglePreview = () => {
-    const collapsed = app.classList.toggle("preview-collapsed");
-    divider?.setAttribute("aria-expanded", String(!collapsed));
-  };
-  divider?.addEventListener("click", togglePreview);
-  divider?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePreview(); }
-  });
-
-  // === 毎フレーム：座標と開眼率の表示 ===
-  window.addEventListener("mp:eye_frame", (e) => {
-    const { ts, count, eye } = e.detail;
-
-    // 1) 開眼率（EAR を閉眼/開眼ベースラインで正規化）
-    if (calib?.openBaseline?.avg && calib?.closedBaseline?.avg) {
-      const ratio = computeEyeOpenRatio(eye).avg;
-
-      // normalize: 0% = closedBaseline, 100% = openBaseline
-      const closedV = calib.closedBaseline.avg || 1e-6;
-      const openV = calib.openBaseline.avg || (closedV + 1e-6);
-      let norm = (ratio - closedV) / (openV - closedV);
-      // handle edge cases
-      if (!isFinite(norm)) norm = 0;
-      const openPctRaw = clamp(norm * 100, 0, 130);
-
-      // EMAで平滑化
-      const alpha = 0.25;
-      emaOpen = (emaOpen == null) ? openPctRaw : (alpha*openPctRaw + (1-alpha)*emaOpen);
-      if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
-
-      // 閾値判定はEMA後の値で（20%未満を閉眼とみなす）
-      const closed = (emaOpen != null && emaOpen < 20);
-      document.body.classList.toggle("eyes-closed", closed);
-    }
-
-    // 2) データ表示（元のランドマーク一覧）
-    const lines = eye.map(p => `#${p.idx}\tx:${p.x}\ty:${p.y}\tz:${p.z}`);
-    if (coordLog) { coordLog.textContent = lines.join("\n"); coordLog.scrollTop = coordLog.scrollHeight; }
-    if (frameInfo) frameInfo.textContent = `pts: ${count} | ${new Date(ts).toLocaleTimeString()}`;
-  });
-
-  // Stop時のUIクリア通知
-  window.addEventListener("mp:clear", () => {
-    if (coordLog)  coordLog.textContent = "";
-    if (frameInfo) frameInfo.textContent = "—";
-    if (openInfo)  openInfo.textContent  = "Open: —%";
-    emaOpen = null;
   });
 });
 
-/* ===== helpers ===== */
-function clamp(x,min=0,max=1){ return Math.max(min, Math.min(max, x)); }
+/* ==== ヘルパー ==== */
+function clamp(x, min = 0, max = 1) {
+  return Math.max(min, Math.min(max, x));
+}
+
+

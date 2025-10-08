@@ -12,20 +12,27 @@
     <!-- ────────── 上段：エージェント＋左右ボタン ────────── -->
     <section id="top">
       <div id="topGrid">
-        <div class="side left">
-          <button id="btnStart" class="circle-btn large">Start</button>
-        </div>
-        <div class="center">
-          <!-- square wrapper keeps a stable 1:1 display aspect regardless of parent resizing -->
-          <div class="canvas-square">
-            <canvas id="myCanvas1" width="1000" height="1000"></canvas>
+        <div class="center" style="display:flex; justify-content:center; align-items:center;">
+          <!-- エージェント2体と中央ボタンを横並び -->
+          <div class="agent-row" 
+              style="display:flex; justify-content:center; align-items:center; gap:80px;">
+
+            <!-- 左エージェント -->
+            <canvas id="myCanvas1" width="300" height="1000"
+                    style="display:block;"></canvas>
+
+            <!-- 中央ボタン -->
+            <button id="btnToggle" class="circle-btn mid">Start</button>
+
+            <!-- 右エージェント -->
+            <canvas id="myCanvas2" width="300" height="1000"
+                    style="display:block;"></canvas>
           </div>
-        </div>
-        <div class="side right">
-          <button id="btnStop" class="circle-btn large" disabled>Stop</button>
         </div>
       </div>
     </section>
+
+
 
     <!-- ────────── 仕切りトグル ────────── -->
     <div id="dividerToggle" role="button" tabindex="0" aria-expanded="true" aria-label="プレビュー領域の表示切替">

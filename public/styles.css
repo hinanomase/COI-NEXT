@@ -35,18 +35,20 @@ button { font: inherit; }
 #top {
   background: #0b0f19;
   display: flex;
+  width: 100vw;
+  height: 50vh;
   align-items: center;
   justify-content: center;
-  padding: 12px;
-  border-bottom: 1px solid rgba(255,255,255,.06);
-  min-height: 0;
+  position: relative;
+  box-sizing: border-box;;
 }
 #topGrid {
   width: min(1200px, 92vw);
   height: 100%;
-  display: grid;
+  display: flex;
   grid-template-columns: 160px 1fr 160px;
   gap: 16px;
+  justify-content: center; 
   align-items: center;
   min-height: 0;
 }
@@ -54,16 +56,21 @@ button { font: inherit; }
 #topGrid .center { height: 100%; display: flex; align-items: center; justify-content: center; min-height: 0; }
 
 /* Agent Canvas */
-#myCanvas1 {
-  /* 内部解像度は canvas の属性で固定（例: 1000x1000）しているので、
-     見た目はアスペクト比を保って縮小表示する */
-  /* 親（.canvas-square）に合わせてカバーさせる。内部の描画解像度は
-     width/height 属性で固定されているため、CSS の stretch は見た目のみ影響します */
+.agent-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 80px;                /* 2体の間隔 */
   width: 100%;
   height: 100%;
+}
+
+/* ====== Canvas（エージェント） ====== */
+.agent-row canvas {
   display: block;
-  object-fit: contain; /* 保持して中央へ */
-  background: transparent;
+  width: auto;
+  height: 100%;             /* 高さを上段領域にフィット */
+  object-fit: contain;      /* 比率を維持して全体を表示 */
 }
 
 /* Wrapper that enforces a square display area regardless of available width/height. */
@@ -99,20 +106,49 @@ button { font: inherit; }
 }
 
 /* Buttons */
-.circle-btn {
+.circle-btn.mid {
+  background-color: #4caf50;
+  border-radius: 50%;
+  color: white;
+  width: 80px;
+  height: 80px;
+  font-size: 16px;
   border: none;
-  border-radius: 999px;
-  padding: 10px 16px;
-  background: #2d7ff9;
-  color: #fff;
-  font-weight: 700;
-  letter-spacing: .02em;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(0,0,0,.25);
-  transition: transform .05s ease, opacity .2s ease, filter .2s ease;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.3s, transform 0.2s;
 }
+#topGrid .center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#btnToggle {
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 120px;
+  height: 120px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+
+.circle-btn.mid:hover {
+  transform: scale(1.05);
+}
+
+.circle-btn.mid.active {
+  background-color: #b9423a; /* Stop状態の赤 */
+}
+
+#btnToggle.active {
+  background-color: #e74c3c; /* Stop時は赤に変化 */
+}
+
 .circle-btn:hover { transform: translateY(-1px); }
 .circle-btn:active { transform: translateY(0); filter: brightness(.96); }
 .circle-btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -185,10 +221,7 @@ button { font: inherit; }
 }
 
 /* ========== Responsive ========== */
-@media (max-width: 900px) {
-  #topGrid { grid-template-columns: 140px 1fr 140px; }
-  .circle-btn.large { font-size: 16px; padding: 12px 20px; }
-}
+
 @media (max-width: 640px) {
   #topGrid { grid-template-columns: 120px 1fr 120px; gap: 12px; }
   .circle-btn.large { font-size: 15px; padding: 11px 18px; }
