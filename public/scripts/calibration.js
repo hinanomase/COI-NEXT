@@ -214,7 +214,33 @@ function createAgentOverlay(canvas){
   function hide(){ target.style.opacity = "0"; }
   function destroy(){ if(wrapper.parentNode) wrapper.parentNode.removeChild(wrapper); }
 
-  return { place, hide, destroy, hideTarget: hide };
+  // allow external color control for the marker and expose target for advanced uses
+  function setColor(color) {
+    try {
+      target.style.background = color;
+      // update halo to a translucent version of the color when possible
+      target.style.boxShadow = `0 0 0 6px ${hexToRgba(color, 0.18)}`;
+    } catch (e) {}
+  }
+  // helper: convert hex or color to rgba(...,alpha) fallback to a simple translucent red if fails
+  function hexToRgba(c, a=0.18) {
+    // if c already contains rgba/transparent keywords, return it lightly
+    if (!c) return `rgba(255,51,51,${a})`;
+    if (c.startsWith('rgba') || c.startsWith('hsla') || c.startsWith('transparent')) return c;
+    // basic hex parsing (#rrggbb)
+    try {
+      if (c.startsWith('#')) {
+        const v = c.slice(1);
+        const r = parseInt(v.slice(0,2),16);
+        const g = parseInt(v.slice(2,4),16);
+        const b = parseInt(v.slice(4,6),16);
+        return `rgba(${r},${g},${b},${a})`;
+      }
+      return `rgba(255,51,51,${a})`;
+    } catch(e){ return `rgba(255,51,51,${a})`; }
+  }
+
+  return { place, hide, destroy, hideTarget: hide, setColor, target };
 }
 
 function placeTargetOnAgent(overlay, ux, uy){
@@ -286,10 +312,18 @@ export function startGazeVisualization(coeffs) {
       // outside both target canvases -> out of bounds
       const ev = new CustomEvent('gaze:out_of_bounds', { detail: { pageX, pageY, canvas1Rect: r1, canvas2Rect: r2 } });
       window.dispatchEvent(ev);
-      // console.warn('[Calibration] Gaze out of bounds (relative to canvases):', pageX, pageY, 'c1:', r1, 'c2:', r2);
-      // tint myCanvas3 with a translucent red to indicate OOB
+      // Instead of hiding the marker, clamp it to the canvas edge and color red so it's always visible
       try { canvas.style.backgroundColor = 'rgba(255,64,64,0.12)'; } catch (e) {}
-      _gazeOverlay.hideTarget();
+
+      // px/py are in canvas pixels; clamp to [0, width/height]
+      const clampedPx = clamp(px, 0, canvas.width);
+      const clampedPy = clamp(py, 0, canvas.height);
+      const uxEdge = clampedPx / canvas.width;
+      const uyEdge = clampedPy / canvas.height;
+      try {
+        _gazeOverlay.setColor('#ff3333');
+        _gazeOverlay.place(uxEdge, uyEdge);
+      } catch (e) { _gazeOverlay.hideTarget(); }
       return;
     }
 
@@ -309,10 +343,10 @@ export function startGazeVisualization(coeffs) {
       _gazeSmoother.y = _gazeSmoother.y * (1 - alpha) + uy * alpha;
     }
 
-      // clear any OOB tint when gaze returns in-bounds
-      try { canvas.style.backgroundColor = ''; } catch (e) {}
+  // clear any OOB tint when gaze returns in-bounds and restore marker color
+  try { canvas.style.backgroundColor = ''; _gazeOverlay.setColor('#2d7ff9'); } catch (e) {}
 
-      _gazeOverlay.place(_gazeSmoother.x, _gazeSmoother.y);
+  _gazeOverlay.place(_gazeSmoother.x, _gazeSmoother.y);
     // in-bounds notification (optional)
     const inEv = new CustomEvent('gaze:in_bounds', { detail: { px, py, ux: _gazeSmoother.x, uy: _gazeSmoother.y } });
     window.dispatchEvent(inEv);
