@@ -35,24 +35,24 @@ button { font: inherit; }
 #top {
   background: #0b0f19;
   display: flex;
-  width: 100vw;
+  width: 100%;
   height: 50vh;
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow: hidden; /* ensure children don't overflow the top area */
   box-sizing: border-box;;
 }
 #topGrid {
   width: min(1200px, 92vw);
   height: 100%;
   display: flex;
-  grid-template-columns: 160px 1fr 160px;
   gap: 16px;
-  justify-content: center; 
-  align-items: center;
+  justify-content: center;
+  align-items: stretch; /* allow children to control their own height but not overflow */
   min-height: 0;
 }
-#topGrid .side { display: flex; align-items: center; justify-content: center; }
+#topGrid .side { display: flex; align-items: center; justify-content: center; flex: 0 0 160px; width:160px; }
 /* === 上段オーバーレイ myCanvas3 === */
 #top .center { position: relative; } /* 念のため */
 #myCanvas3 {
@@ -71,16 +71,20 @@ button { font: inherit; }
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 80px;                /* 2体の間隔 */
+  gap: clamp(24px, 5vw, 80px); /* responsive gap while preserving spacing */
   width: 100%;
   height: 100%;
+  min-height: 0; /* allow children to shrink inside flex */
+  overflow: hidden;
 }
 
 /* ====== Canvas（エージェント） ====== */
 .agent-row canvas {
   display: block;
   width: auto;
-  height: 100%;             /* 高さを上段領域にフィット */
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;      /* 比率を維持して全体を表示 */
 }
 
@@ -93,6 +97,11 @@ button { font: inherit; }
   width: 100%;
   max-width: 100%;
   max-height: 100%;
+
+  /* allow the square to flex within the agent-row but not exceed half the row */
+  flex: 1 1 0;
+  max-width: 50%;
+  box-sizing: border-box;
 
   /* make it a positioned container for the absolutely positioned canvas */
   position: relative;
@@ -121,12 +130,15 @@ button { font: inherit; }
   background-color: #4caf50;
   border-radius: 50%;
   color: white;
-  width: 80px;
-  height: 80px;
+  /* keep a responsive square shape without being stretched by flex parents */
+  aspect-ratio: 1 / 1;
+  width: clamp(64px, 10vw, 80px);
+  height: auto;
   font-size: 16px;
   border: none;
   cursor: pointer;
   transition: background-color 0.3s, transform 0.2s;
+  flex: 0 0 auto;
 }
 #topGrid .center {
   display: flex;
@@ -140,11 +152,13 @@ button { font: inherit; }
   color: white;
   border: none;
   border-radius: 50%;
-  width: 120px;
-  height: 120px;
+  aspect-ratio: 1 / 1;
+  width: clamp(80px, 16vw, 120px);
+  height: auto;
   font-size: 1.2rem;
   cursor: pointer;
   transition: background-color 0.3s ease;
+  flex: 0 0 auto;
 }
 
 
