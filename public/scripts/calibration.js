@@ -5,10 +5,15 @@
  *  - キャリブ表示点は #myCanvas3 上に重ねて描画する。
  */
 
+// const GRID = [
+//   [0.15,0.15],[0.5,0.15],[0.85,0.15],
+//   [0.15,0.5 ],[0.5,0.5 ],[0.85,0.5 ],
+//   [0.15,0.85],[0.5,0.85],[0.85,0.85],
+// ];
 const GRID = [
-  [0.15,0.15],[0.5,0.15],[0.85,0.15],
-  [0.15,0.5 ],[0.5,0.5 ],[0.85,0.5 ],
-  [0.15,0.85],[0.5,0.85],[0.85,0.85],
+  [0.05,0.05],[0.5,0.05],[0.95,0.05],
+  [0.05,0.5 ],[0.5,0.5 ],[0.95,0.5 ],
+  [0.05,0.95],[0.5,0.95],[0.95,0.95],
 ];
 
 // === exported API ===
@@ -224,6 +229,9 @@ let _gazeListener = null;
 let _gazeOverlay = null;
 let _gazeSmoother = { x: null, y: null };
 let _gazeW = null;
+let _gazeOutHandler = null;
+let _gazeInHandler = null;
+let _dividerHandler = null;
 
 /** 開始：localStorage か引数から係数を読み取り、mp:eye_frame を購読して可視化 */
 export function startGazeVisualization(coeffs) {
@@ -247,6 +255,11 @@ export function startGazeVisualization(coeffs) {
 
   // listener
   _gazeListener = (e) => {
+    // if preview is collapsed, do nothing (hide overlay)
+    const app = document.getElementById('app');
+    const collapsed = app && app.classList && app.classList.contains('preview-collapsed');
+    if (collapsed) { if (_gazeOverlay) _gazeOverlay.hideTarget(); return; }
+
     const feat = computeFeatureFromEye(e.detail.eye);
     if (!feat) {
       _gazeOverlay.hideTarget();
@@ -256,7 +269,31 @@ export function startGazeVisualization(coeffs) {
     const dot = (w) => f.reduce((s,v,i)=>s + v * (w[i]||0), 0);
     let px = dot(_gazeW.W_x), py = dot(_gazeW.W_y);
 
-    // clamp to canvas
+    // determine whether gaze (px,py) on myCanvas3 maps into myCanvas1 or myCanvas2
+    const canvasRect = canvas.getBoundingClientRect();
+    const pageX = canvasRect.left + (px / canvas.width) * canvasRect.width;
+    const pageY = canvasRect.top  + (py / canvas.height) * canvasRect.height;
+
+    const c1 = document.getElementById('myCanvas1');
+    const c2 = document.getElementById('myCanvas2');
+    const r1 = c1 ? c1.getBoundingClientRect() : null;
+    const r2 = c2 ? c2.getBoundingClientRect() : null;
+
+    const in1 = r1 && pageX >= r1.left && pageX <= r1.right && pageY >= r1.top && pageY <= r1.bottom;
+    const in2 = r2 && pageX >= r2.left && pageX <= r2.right && pageY >= r2.top && pageY <= r2.bottom;
+
+    if (!in1 && !in2) {
+      // outside both target canvases -> out of bounds
+      const ev = new CustomEvent('gaze:out_of_bounds', { detail: { pageX, pageY, canvas1Rect: r1, canvas2Rect: r2 } });
+      window.dispatchEvent(ev);
+      // console.warn('[Calibration] Gaze out of bounds (relative to canvases):', pageX, pageY, 'c1:', r1, 'c2:', r2);
+      // tint myCanvas3 with a translucent red to indicate OOB
+      try { canvas.style.backgroundColor = 'rgba(255,64,64,0.12)'; } catch (e) {}
+      _gazeOverlay.hideTarget();
+      return;
+    }
+
+    // clamp to canvas (redundant when in-bounds, but keep for safety)
     px = clamp(px, 0, canvas.width);
     py = clamp(py, 0, canvas.height);
 
@@ -272,11 +309,85 @@ export function startGazeVisualization(coeffs) {
       _gazeSmoother.y = _gazeSmoother.y * (1 - alpha) + uy * alpha;
     }
 
-    _gazeOverlay.place(_gazeSmoother.x, _gazeSmoother.y);
+      // clear any OOB tint when gaze returns in-bounds
+      try { canvas.style.backgroundColor = ''; } catch (e) {}
+
+      _gazeOverlay.place(_gazeSmoother.x, _gazeSmoother.y);
+    // in-bounds notification (optional)
+    const inEv = new CustomEvent('gaze:in_bounds', { detail: { px, py, ux: _gazeSmoother.x, uy: _gazeSmoother.y } });
+    window.dispatchEvent(inEv);
   };
 
   window.addEventListener("mp:eye_frame", _gazeListener);
   console.log("[Calibration] Gaze visualization started");
+
+    // --- highlight helpers ---
+    function clearHighlights() {
+      const c1 = document.getElementById('myCanvas1');
+      const c2 = document.getElementById('myCanvas2');
+      const c3 = document.getElementById('myCanvas3');
+      [c1, c2, c3].forEach(el => {
+        if (!el) return;
+        el.style.boxShadow = '';
+        el.style.outline = '';
+      });
+    }
+    function highlightEl(el, color) {
+      clearHighlights();
+      if (!el) return;
+      el.style.boxShadow = `0 0 0 6px ${color}`;
+    }
+
+    // gaze out/in handlers (use normalized ux from event to decide left/right)
+    _gazeOutHandler = (ev) => {
+      const app = document.getElementById('app');
+      const collapsed = app && app.classList && app.classList.contains('preview-collapsed');
+      if (collapsed) { clearHighlights(); return; }
+      const c3 = document.getElementById('myCanvas3');
+      highlightEl(c3, '#ff3333'); // red for out-of-bounds
+    };
+    _gazeInHandler = (ev) => {
+      const app = document.getElementById('app');
+      const collapsed = app && app.classList && app.classList.contains('preview-collapsed');
+      if (collapsed) { clearHighlights(); return; }
+      const ux = (ev && ev.detail && typeof ev.detail.ux === 'number') ? ev.detail.ux : null;
+      const c1 = document.getElementById('myCanvas1');
+      const c2 = document.getElementById('myCanvas2');
+      if (ux == null) {
+        // fallback: highlight canvas3
+        const c3 = document.getElementById('myCanvas3');
+        highlightEl(c3, 'greenyellow');
+        return;
+      }
+      // if canvas1 and canvas2 exist, highlight the one corresponding to left/right
+      if (c1 && c2) {
+        if (ux < 0.5) highlightEl(c1, 'greenyellow');
+        else highlightEl(c2, 'greenyellow');
+      } else {
+        // fallback: use left/right half of canvas3
+        const c3 = document.getElementById('myCanvas3');
+        if (!c3) return;
+        highlightEl(c3, 'greenyellow');
+      }
+    };
+
+    window.addEventListener('gaze:out_of_bounds', _gazeOutHandler);
+    window.addEventListener('gaze:in_bounds', _gazeInHandler);
+
+    // respect dividerToggle: when preview collapsed, clear highlights and disable
+    const dividerToggle = document.getElementById('dividerToggle');
+    _dividerHandler = () => {
+      // allow main.js to toggle class first
+      setTimeout(() => {
+        const app = document.getElementById('app');
+        const collapsed = app && app.classList && app.classList.contains('preview-collapsed');
+        if (collapsed) {
+          // clear visuals
+          if (typeof clearHighlights === 'function') clearHighlights();
+        }
+      }, 0);
+    };
+    if (dividerToggle) dividerToggle.addEventListener('click', _dividerHandler);
 }
 
 /** 停止 */
@@ -291,6 +402,16 @@ export function stopGazeVisualization() {
   }
   _gazeSmoother = { x: null, y: null };
   _gazeW = null;
+  // remove our added event handlers
+  if (_gazeOutHandler) { window.removeEventListener('gaze:out_of_bounds', _gazeOutHandler); _gazeOutHandler = null; }
+  if (_gazeInHandler) { window.removeEventListener('gaze:in_bounds', _gazeInHandler); _gazeInHandler = null; }
+  if (_dividerHandler) { const dividerToggle = document.getElementById('dividerToggle'); if (dividerToggle) dividerToggle.removeEventListener('click', _dividerHandler); _dividerHandler = null; }
+
+  // clear visual highlights
+  const c1 = document.getElementById('myCanvas1');
+  const c2 = document.getElementById('myCanvas2');
+  const c3 = document.getElementById('myCanvas3');
+  [c1, c2, c3].forEach(el => { if (!el) return; el.style.boxShadow = ''; el.style.outline = ''; });
   console.log("[Calibration] Gaze visualization stopped");
 }
 

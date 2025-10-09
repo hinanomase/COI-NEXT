@@ -62,7 +62,7 @@ button { font: inherit; }
   width: 100%;     /* 上段全幅 */
   height: 100%;    /* 上段全高 */
   pointer-events: none;  /* ボタン操作を透過 */
-  z-index: 15;          /* エージェントより上 */
+  z-index: 17;          /* エージェントより上 */
   background: transparent;
 }
 
@@ -75,7 +75,10 @@ button { font: inherit; }
   width: 100%;
   height: 100%;
   min-height: 0; /* allow children to shrink inside flex */
-  overflow: hidden;
+  /* allow decorative outlines to be visible and avoid clipping by parent */
+  overflow: visible;
+  position: relative; /* create stacking context so z-index works */
+  z-index: 16; /* place agent row above #myCanvas3 (z-index:15) */
 }
 
 /* ====== Canvas（エージェント） ====== */
@@ -87,6 +90,7 @@ button { font: inherit; }
   max-height: 100%;
   object-fit: contain;      /* 比率を維持して全体を表示 */
 }
+
 
 /* Wrapper that enforces a square display area regardless of available width/height. */
 .canvas-square {
@@ -276,6 +280,18 @@ button { font: inherit; }
   transform: translateY(0) scale(1.02);
   box-shadow: 0 8px 22px rgba(255,46,46,0.18), inset 0 -3px 8px rgba(0,0,0,0.12);
   animation: pulseBadge 1.8s infinite ease-in-out;
+}
+
+/* --- Replace closed-badge UX: hide the badge and instead color the Open % red --- */
+/* Hide the badge entirely (we no longer show it) */
+.closed-badge {
+  display: none !important;
+}
+
+/* When the dataPanel has .eyes-closed, color the Open percent red for emphasis */
+#dataPanel.eyes-closed #openInfo {
+  color: #ff6b6b !important; /* override inline style in index.html */
+  font-weight: 700 !important;
 }
 
 @keyframes pulseBadge {

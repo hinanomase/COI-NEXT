@@ -61,6 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isRunning) return;
     isRunning = true;
     setBtnState(true);
+    btnToggle.style.display = 'none';
     hideAgents();
 
     try {
@@ -164,9 +165,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
       
       if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
-      if (closedInfo) {
+      if (dataPanel) {
         const isClosed = emaOpen < 20;
-        closedInfo.setAttribute("aria-hidden", isClosed ? "false" : "true");
+        dataPanel.classList.toggle('eyes-closed', isClosed);
+        // Keep aria-hidden on the badge for screen readers as well
+        if (closedInfo) closedInfo.setAttribute("aria-hidden", isClosed ? "false" : "true");
       }
     }
 
