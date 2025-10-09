@@ -53,14 +53,15 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   // 初期状態：非表示
-  // hideAgents();
+  hideAgents();
+  // btnToggle.style.display = 'none';
 
   // ===== Start / Stop =====
   const handleStart = async () => {
     if (isRunning) return;
     isRunning = true;
     setBtnState(true);
-    // hideAgents();
+    hideAgents();
 
     try {
       console.log("[Main] Start → MediaPipe初期化");

@@ -35,7 +35,7 @@ const position_AgentR = {
 // Live2D エージェントクラス
 // ========================================================
 class SetAgent {
-  constructor(debug, serverURL, modelPath, resourcePath, position, canvasId) {
+  constructor(debug, serverURL, modelPath, resourcePath, position, canvasId, libraryName) {
     this.debug = debug;
     this.serverURL = serverURL;
     this.modelPathPath = modelPath;
@@ -43,20 +43,27 @@ class SetAgent {
     this.position = position;
     this.canvasId = canvasId;
     this.indexLibrary = null;
+    this.libraryName = libraryName;
     this.init();
   }
 
   async init() {
-    // SDK群を一度だけ読み込み
-    if (!window._Live2D_Core_Loaded) {
-      await loadScript(
-        "https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"
-      );
-      await loadScript(
-        "https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"
-      );
-      window._Live2D_Core_Loaded = true;
-      console.log("[Agent] Live2D Core loaded");
+    // SDK群を一度だけ読み込み（複数インスタンスが同時に init しても一度だけ実行されるようにする）
+    if (!window._Live2D_Core_Promise) {
+      window._Live2D_Core_Promise = (async () => {
+        await loadScript("https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js");
+        await loadScript("https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js");
+        window._Live2D_Core_Loaded = true;
+        console.log("[Agent] Live2D Core loaded (global)");
+      })();
+    }
+
+    try {
+      await window._Live2D_Core_Promise;
+    } catch (e) {
+      console.error('[Agent] Live2D core load failed in init:', e);
+      // ここで止める
+      return;
     }
 
     // indexLibrary_*（boyA/boyB）を読み込む
@@ -87,37 +94,49 @@ class SetAgent {
 // ========================================================
 function loadScript(url) {
   return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${url}"]`)) {
+    // 既存スクリプトを starts-with でチェック（?v= の違いで重複追加されないように）
+    const exists = Array.from(document.scripts).some(s => s.src && s.src.indexOf(url) === 0);
+    if (exists) {
+      console.log(`[Agent] loadScript: script already present for ${url}`);
       resolve();
       return;
     }
+
     const script = document.createElement("script");
-    script.src = url + "?v=" + Date.now(); // キャッシュ防止
-    script.onload = resolve;
-    script.onerror = reject;
+    // キャッシュ防止のクエリを付ける
+    script.src = url + "?v=" + Date.now();
+    script.onload = () => {
+      console.log(`[Agent] loadScript: loaded ${url}`);
+      resolve();
+    };
+    script.onerror = (e) => {
+      console.error(`[Agent] loadScript: failed to load ${url}`, e);
+      reject(e);
+    };
     document.head.appendChild(script);
   });
 }
 
 // ========================================================
-// 左右のエージェントを生成
-// ========================================================
-const AgentLeft = new SetAgent(
-  false,
-  "",
-  modelPath_Agent,
-  resourcePath_Left,
-  position_AgentL,
-  "myCanvas1"
-);
-const AgentRight = new SetAgent(
-  false,
-  "",
-  modelPath_Agent,
-  resourcePath_Right,
-  position_AgentR,
-  "myCanvas2"
-);
+// エージェントは順次生成する（片方の表示完了・表情適用後に次を生成）
+// Agents オブジェクトは後でセットされる（初期は null）
+export const Agents = { left: null, right: null };
+// const AgentLeft = new SetAgent(
+//   false,
+//   "",
+//   modelPath_Agent,
+//   resourcePath_Left,
+//   position_AgentL,
+//   "myCanvas1"
+// );
+// const AgentRight = new SetAgent(
+//   false,
+//   "",
+//   modelPath_Agent,
+//   resourcePath_Right,
+//   position_AgentR,
+//   "myCanvas2"
+// );
 
 // ========================================================
 // 初期表情の設定（左=笑顔 / 右=悲しい）
@@ -181,24 +200,144 @@ function applyInitialExpressions() {
   tick();
 }
 
-window.addEventListener("load", applyInitialExpressions);
+// 指定エージェントの indexLibrary に対して特定の表情メソッドを呼ぶヘルパー
+// getter: () => Agents.left?.indexLibrary など
+// methodName: 'App_set_Joy' など
+// arg: 数値引数
+async function applyExpressionToAgent(getter, methodName, arg, retries = 20, delay = 200) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const lib = getter();
+      if (lib && typeof lib[methodName] === 'function') {
+        lib[methodName](arg);
+        return true;
+      }
+    } catch (e) {
+      console.warn('[Agent] applyExpressionToAgent attempt failed', methodName, e);
+    }
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  console.error('[Agent] applyExpressionToAgent: 最大リトライ回数に達しました', methodName);
+  return false;
+}
 
+// 表情適用は model の表示が完了したことを示すカスタムイベントを受けてから行う
+// indexLibrary_boyB.js などが `processCompleted` イベントを dispatch するので、
+// `detail.status` に `DisplayCompleted` を含むイベントを受け取ったら実行する。
+// トラッキング用の状態: left/right が個別に完了したか（ここで宣言）
+const _displayCompletedState = { left: false, right: false };
 
-// ========================================================
-// 両者をまとめて制御
-// ========================================================
-export const Agents = {
-  left: AgentLeft,
-  right: AgentRight,
-  startSpeak() {
-    this.left.startAgentSpeak();
-    this.right.startAgentSpeak();
-  },
-  stopSpeak() {
-    this.left.stopAgentSpeak();
-    this.right.stopAgentSpeak();
-  },
-};
+function _onProcessCompleted(e) {
+  try {
+    const status = e && e.detail && e.detail.status ? String(e.detail.status) : '';
+    if (/DisplayCompleted/.test(status)) {
+      console.log('[Agent] processCompleted received:', status);
+      // どのエージェントが完了したかをステータスで判定し、個別に表情を適用する
+      if (/BoyA/i.test(status)) {
+        // 左エージェントに Joy を適用
+        applyExpressionToAgent(() => Agents.left?.indexLibrary, 'App_set_Joy', 7).then((ok) => {
+          if (ok) {
+            console.log('[Agent] 左: 笑顔適用成功 (from event)');
+            _displayCompletedState.left = true;
+          } else {
+            console.warn('[Agent] 左: 笑顔適用に失敗 (from event)');
+          }
+          if (_displayCompletedState.left && _displayCompletedState.right) {
+            console.log('[Agent] 両方の表示完了を受信 → processCompleted リスナを解除');
+            document.removeEventListener('processCompleted', _onProcessCompleted);
+          }
+        });
+      } else if (/BoyB/i.test(status)) {
+        // 右エージェントに Sadness を適用
+        applyExpressionToAgent(() => Agents.right?.indexLibrary, 'App_set_Sadness', 3).then((ok) => {
+          if (ok) {
+            console.log('[Agent] 右: 悲しい顔適用成功 (from event)');
+            _displayCompletedState.right = true;
+          } else {
+            console.warn('[Agent] 右: 悲しい顔適用に失敗 (from event)');
+          }
+          if (_displayCompletedState.left && _displayCompletedState.right) {
+            console.log('[Agent] 両方の表示完了を受信 → processCompleted リスナを解除');
+            document.removeEventListener('processCompleted', _onProcessCompleted);
+          }
+        });
+      } else {
+        // 汎用 DisplayCompleted -> 両方適用
+        applyInitialExpressions();
+        _displayCompletedState.left = true;
+        _displayCompletedState.right = true;
+        console.log('[Agent] 汎用 DisplayCompleted を受信 → 両方に表情を適用しリスナ解除');
+        document.removeEventListener('processCompleted', _onProcessCompleted);
+      }
+    } else {
+      console.log('[Agent] processCompleted received but status not display-completed:', status);
+    }
+  } catch (err) {
+    console.error('[Agent] processCompleted handler error', err);
+  }
+}
 
-// 互換性維持（既存コードが import { Agent } を使用していても動く）
-export const Agent = Agents;
+document.addEventListener('processCompleted', _onProcessCompleted);
+
+// processCompleted イベントが来るのを一度だけ待つユーティリティ
+function waitForProcessCompleted(matcher, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    let timer = null;
+    function handler(e) {
+      const status = e && e.detail && e.detail.status ? String(e.detail.status) : '';
+      if (matcher.test(status)) {
+        document.removeEventListener('processCompleted', handler);
+        if (timer) clearTimeout(timer);
+        resolve(status);
+      }
+    }
+    document.addEventListener('processCompleted', handler);
+    timer = setTimeout(() => {
+      document.removeEventListener('processCompleted', handler);
+      reject(new Error('waitForProcessCompleted timeout'));
+    }, timeout);
+  });
+}
+
+// 左→右の順で初期化・表示待ち・表情適用を行う
+export async function initAgentsSequentially(debug = false) {
+  // 左を生成
+  Agents.left = new SetAgent(debug, '', modelPath_Agent, resourcePath_Left, position_AgentL, 'myCanvas1');
+  try {
+    // 左の表示完了イベント (DisplayCompletedBoyA 等) を待つ
+    await waitForProcessCompleted(/DisplayCompleted.*BoyA/i, 15000);
+    console.log('[Agent] 左が表示完了 → 表情適用を試行');
+    await applyExpressionToAgent(() => Agents.left?.indexLibrary, 'App_set_Joy', 7);
+  } catch (e) {
+    console.warn('[Agent] 左の表示待ちまたは表情適用で問題:', e);
+  }
+
+  // 少し待ってから右を生成
+  await new Promise((r) => setTimeout(r, 200));
+  Agents.right = new SetAgent(debug, '', modelPath_Agent, resourcePath_Right, position_AgentR, 'myCanvas2');
+  try {
+    await waitForProcessCompleted(/DisplayCompleted.*BoyB/i, 15000);
+    console.log('[Agent] 右が表示完了 → 表情適用を試行');
+    await applyExpressionToAgent(() => Agents.right?.indexLibrary, 'App_set_Sadness', 3);
+  } catch (e) {
+    console.warn('[Agent] 右の表示待ちまたは表情適用で問題:', e);
+  }
+
+  return Agents;
+}
+initAgentsSequentially();
+// export const Agents = {
+//   left: AgentLeft,
+//   right: AgentRight,
+//   startSpeak() {
+//     this.left.startAgentSpeak();
+//     this.right.startAgentSpeak();
+//   },
+//   stopSpeak() {
+//     this.left.stopAgentSpeak();
+//     this.right.stopAgentSpeak();
+//   },
+// };
+
+// // 互換性維持（既存コードが import { Agent } を使用していても動く）
+// export const Agent = Agents;
