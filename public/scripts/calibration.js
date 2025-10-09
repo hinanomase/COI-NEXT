@@ -2,7 +2,7 @@
  * calibration.js
  *  - MediaPipe からの mp:eye_frame イベントを使い、特徴量を収集して
  *    3x3 グリッドで最小二乗フィッティングを行う（eye-tracking の移植版）。
- *  - キャリブ表示点は #myCanvas1 上に重ねて描画する。
+ *  - キャリブ表示点は #myCanvas3 上に重ねて描画する。
  */
 
 const GRID = [
@@ -13,7 +13,7 @@ const GRID = [
 
 // === exported API ===
 export async function runCalibration() {
-  const canvas = document.getElementById("myCanvas1");
+  const canvas = document.getElementById("myCanvas3");
   const overlay = createAgentOverlay(canvas);
   const ui = buildOverlayUI(document.getElementById("mpPreviewWrap")); // keep small panel
 
@@ -241,7 +241,7 @@ export function startGazeVisualization(coeffs) {
   }
   _gazeW = { W_x: obj.W_x, W_y: obj.W_y };
 
-  const canvas = document.getElementById("myCanvas1");
+  const canvas = document.getElementById("myCanvas3");
   if (!canvas) return;
   _gazeOverlay = createAgentOverlay(canvas);
 

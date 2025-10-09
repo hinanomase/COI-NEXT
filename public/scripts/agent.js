@@ -152,7 +152,7 @@ function applyInitialExpressions() {
       const rightLib = Agents.right?.indexLibrary;
       if (rightLib && typeof rightLib.App_set_Sadness === "function") {
         try {
-          rightLib.App_set_Sadness(3); // ← あなたの指定値をそのまま使用
+          rightLib.App_set_Sadness(2); // ← あなたの指定値をそのまま使用
           rightDone = true;
           console.log("[Agent] 右: 悲しい顔(App_set_Sadness(3)) を適用");
         } catch (e) {

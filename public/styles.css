@@ -53,7 +53,18 @@ button { font: inherit; }
   min-height: 0;
 }
 #topGrid .side { display: flex; align-items: center; justify-content: center; }
-#topGrid .center { height: 100%; display: flex; align-items: center; justify-content: center; min-height: 0; }
+/* === 上段オーバーレイ myCanvas3 === */
+#top .center { position: relative; } /* 念のため */
+#myCanvas3 {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;     /* 上段全幅 */
+  height: 100%;    /* 上段全高 */
+  pointer-events: none;  /* ボタン操作を透過 */
+  z-index: 15;          /* エージェントより上 */
+  background: transparent;
+}
 
 /* Agent Canvas */
 .agent-row {
