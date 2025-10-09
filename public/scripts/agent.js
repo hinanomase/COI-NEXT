@@ -121,63 +121,64 @@ const AgentRight = new SetAgent(
 
 // ========================================================
 // 初期表情の設定（左=笑顔 / 右=悲しい）
-//   ※ boyA/boyB の IndexLibrary 内部APIを使用
-//     - App_set_Affiliation(1) : 笑顔（親しみ）
-//     - App_set_Sadness(1)     : 悲しい
-//   モデル初期化は非同期なので、起動後に数回リトライします
-// ========================================================
-// ========================================================
-// 初期表情の設定（左=笑顔 / 右=悲しい）
+//   ・左右どちらも適用できるまでリトライ
+//   ・ロード順のブレで片方だけになる問題を解消
 // ========================================================
 function applyInitialExpressions() {
-  const tryApply = () => {
-    let appliedAny = false;
+  let leftDone = false;
+  let rightDone = false;
 
-    // 左（boyA）: 笑顔 (joy)
-    const leftLib = Agents.left?.indexLibrary;
-    if (leftLib) {
-      if (typeof leftLib.App_set_Joy === "function") {
+  const maxRetry = 40;     // 最大リトライ回数（40回）
+  const intervalMs = 250;  // 間隔（ms）
+  let tries = 0;
+
+  const tick = () => {
+    // 左（boyA）: 笑顔 (Joy)
+    if (!leftDone) {
+      const leftLib = Agents.left?.indexLibrary;
+      if (leftLib && typeof leftLib.App_set_Joy === "function") {
         try {
-          leftLib.App_set_Joy(3); 
-          console.log("[Agent] 左: 笑顔(App_set_Joy)を適用");
-          appliedAny = true;
+          leftLib.App_set_Joy(4); // ← あなたの指定値をそのまま使用
+          leftDone = true;
+          console.log("[Agent] 左: 笑顔(App_set_Joy(7)) を適用");
         } catch (e) {
           console.warn("[Agent] 左: 笑顔適用失敗", e);
         }
-      } else {
-        console.warn("[Agent] 左: App_set_Joy が未定義");
       }
     }
 
     // 右（boyB）: 悲しい (Sadness)
-    const rightLib = Agents.right?.indexLibrary;
-    if (rightLib) {
-      if (typeof rightLib.App_set_Sadness === "function") {
+    if (!rightDone) {
+      const rightLib = Agents.right?.indexLibrary;
+      if (rightLib && typeof rightLib.App_set_Sadness === "function") {
         try {
-          rightLib.App_set_Sadness(4); 
-          console.log("[Agent] 右: 悲しい顔(App_set_Sadness(10))を適用");
-          appliedAny = true;
+          rightLib.App_set_Sadness(3); // ← あなたの指定値をそのまま使用
+          rightDone = true;
+          console.log("[Agent] 右: 悲しい顔(App_set_Sadness(3)) を適用");
         } catch (e) {
           console.warn("[Agent] 右: 悲しい顔適用失敗", e);
         }
-      } else {
-        console.warn("[Agent] 右: App_set_Sadness が未定義");
       }
     }
 
-    return appliedAny;
+    // 両方適用できたら終了
+    if (leftDone && rightDone) {
+      clearInterval(timer);
+      return;
+    }
+
+    // 規定回数を超えたら終了（どちらか未適用なら警告）
+    tries++;
+    if (tries >= maxRetry) {
+      clearInterval(timer);
+      if (!leftDone)  console.warn("[Agent] 左: 表情適用に失敗（タイムアウト）");
+      if (!rightDone) console.warn("[Agent] 右: 表情適用に失敗（タイムアウト）");
+    }
   };
 
-  let retry = 0;
-  const maxRetry = 12;
-  const timer = setInterval(() => {
-    const ok = tryApply();
-    retry++;
-    if (ok || retry >= maxRetry) {
-      clearInterval(timer);
-      if (!ok) console.warn("[Agent] 表情適用APIが見つからず、適用を断念しました");
-    }
-  }, 400);
+  // すぐ1回試し、その後インターバルで粘る
+  const timer = setInterval(tick, intervalMs);
+  tick();
 }
 
 window.addEventListener("load", applyInitialExpressions);
