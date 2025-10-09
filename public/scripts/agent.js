@@ -1,6 +1,7 @@
 // public/scripts/agent.js
 // ========================================================
 // 左右2体のエージェントを表示（右のみローカルboyB版）
+// 追加: 左=笑顔(joy)、右=悲しい顔(Sadness) を内部APIで適用
 // ========================================================
 
 // モデルパス（両者共通）
@@ -117,6 +118,70 @@ const AgentRight = new SetAgent(
   position_AgentR,
   "myCanvas2"
 );
+
+// ========================================================
+// 初期表情の設定（左=笑顔 / 右=悲しい）
+//   ※ boyA/boyB の IndexLibrary 内部APIを使用
+//     - App_set_Affiliation(1) : 笑顔（親しみ）
+//     - App_set_Sadness(1)     : 悲しい
+//   モデル初期化は非同期なので、起動後に数回リトライします
+// ========================================================
+// ========================================================
+// 初期表情の設定（左=笑顔 / 右=悲しい）
+// ========================================================
+function applyInitialExpressions() {
+  const tryApply = () => {
+    let appliedAny = false;
+
+    // 左（boyA）: 笑顔 (joy)
+    const leftLib = Agents.left?.indexLibrary;
+    if (leftLib) {
+      if (typeof leftLib.App_set_Joy === "function") {
+        try {
+          leftLib.App_set_Joy(3); 
+          console.log("[Agent] 左: 笑顔(App_set_Joy)を適用");
+          appliedAny = true;
+        } catch (e) {
+          console.warn("[Agent] 左: 笑顔適用失敗", e);
+        }
+      } else {
+        console.warn("[Agent] 左: App_set_Joy が未定義");
+      }
+    }
+
+    // 右（boyB）: 悲しい (Sadness)
+    const rightLib = Agents.right?.indexLibrary;
+    if (rightLib) {
+      if (typeof rightLib.App_set_Sadness === "function") {
+        try {
+          rightLib.App_set_Sadness(4); 
+          console.log("[Agent] 右: 悲しい顔(App_set_Sadness(10))を適用");
+          appliedAny = true;
+        } catch (e) {
+          console.warn("[Agent] 右: 悲しい顔適用失敗", e);
+        }
+      } else {
+        console.warn("[Agent] 右: App_set_Sadness が未定義");
+      }
+    }
+
+    return appliedAny;
+  };
+
+  let retry = 0;
+  const maxRetry = 12;
+  const timer = setInterval(() => {
+    const ok = tryApply();
+    retry++;
+    if (ok || retry >= maxRetry) {
+      clearInterval(timer);
+      if (!ok) console.warn("[Agent] 表情適用APIが見つからず、適用を断念しました");
+    }
+  }, 400);
+}
+
+window.addEventListener("load", applyInitialExpressions);
+
 
 // ========================================================
 // 両者をまとめて制御
