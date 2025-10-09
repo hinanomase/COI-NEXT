@@ -11,6 +11,7 @@ import {
   stopMediaPipeAll,
 } from "./mediapipe.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
+import { DataAnalyzer } from "./dataAnalyzer.js"; 
 
 document.addEventListener("DOMContentLoaded", () => {
   // ===== DOM参照 =====
@@ -30,6 +31,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const frameInfo = document.getElementById("frameInfo");
   const openInfo  = document.getElementById("openInfo");
   const closedInfo = document.getElementById("closedInfo");
+
+  const dataPanel = document.getElementById("dataPanel"); 
+  const analyzer = new DataAnalyzer(20); 
+
 
   // ===== 状態 =====
   let isRunning = false;
@@ -63,6 +68,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       console.log("[Main] キャリブレーション開始");
       calib = await runCalibration();
+
+      analyzer.reset();
 
       console.log("[Main] キャリブレーション完了 → エージェント表示");
       showAgents();
@@ -100,6 +107,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try { await stopMediaPipeAll(); } catch {}
 
     hideAgents();
+
+    analyzer.renderToPanel(dataPanel); 
 
     emaOpen = null;
     if (coordLog)  coordLog.textContent = "";
@@ -150,7 +159,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const openPctRaw = clamp(norm * 100, 0, 130);
       const alpha = 0.25;
       emaOpen = (emaOpen == null) ? openPctRaw : alpha * openPctRaw + (1 - alpha) * emaOpen;
+      analyzer.add(emaOpen);
 
+      
       if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
       if (closedInfo) {
         const isClosed = emaOpen < 20;
