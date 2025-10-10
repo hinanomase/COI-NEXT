@@ -3,6 +3,7 @@
 // Start→キャリブ完了まではエージェント非表示 / 完了後に表示
 // 10秒経過 or Stop押下 で終了（非表示）
 // 口パク機能なし。既存構成を変えずにCanvas表示のみ制御。
+// + 追加: キャリブの視線可視化イベントを使って左右注視割合を集計
 // ========================================================
 
 import {
@@ -11,7 +12,7 @@ import {
   stopMediaPipeAll,
 } from "./mediapipe.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
-import { DataAnalyzer } from "./dataAnalyzer.js"; 
+import { DataAnalyzer } from "./dataAnalyzer.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   // ===== DOM参照 =====
@@ -32,9 +33,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const openInfo  = document.getElementById("openInfo");
   const closedInfo = document.getElementById("closedInfo");
 
-  const dataPanel = document.getElementById("dataPanel"); 
-  const analyzer = new DataAnalyzer(20); 
+  const dataPanel = document.getElementById("dataPanel");
+  const analyzer = new DataAnalyzer(20);
 
+  // ===== 追加: 視線集計用の状態 =====
+  let gazeStartedAt = 0;
+  let gazeCounts = null;
+  let onGazeIn = null;
+  let onGazeOOB = null;
 
   // ===== 状態 =====
   let isRunning = false;
@@ -54,7 +60,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 初期状態：非表示
   hideAgents();
-  // btnToggle.style.display = 'none';
 
   // ===== Start / Stop =====
   const handleStart = async () => {
@@ -73,6 +78,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       analyzer.reset();
 
+      // === 視線割合の集計を開始（キャリブ完了後〜Stopまで） ===
+      setupGazeAggregation();
+
       console.log("[Main] キャリブレーション完了 → エージェント表示");
       showAgents();
 
@@ -89,6 +97,7 @@ document.addEventListener("DOMContentLoaded", () => {
       isRunning = false;
       setBtnState(false);
       hideAgents();
+      teardownGazeAggregation(); // 念のため
     }
   };
 
@@ -110,7 +119,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     hideAgents();
 
-    analyzer.renderToPanel(dataPanel); 
+  
+    // 既存の開閉統計を先に描画
+    analyzer.renderToPanel(dataPanel);
+
+    const gazeResult = (typeof teardownGazeAggregation === "function")
+      ? teardownGazeAggregation()           // 直前までの集計関数がある場合
+      : (window.__lastGazeResult || {left:0,right:0,durationSec:0,samplesIn:0,oobSamples:0});
+    renderFinalResults(dataPanel, gazeResult);
+
 
     emaOpen = null;
     if (coordLog)  coordLog.textContent = "";
@@ -161,15 +178,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const openPctRaw = clamp(norm * 100, 0, 130);
       const alpha = 0.25;
       emaOpen = (emaOpen == null) ? openPctRaw : alpha * openPctRaw + (1 - alpha) * emaOpen;
+
+      // 既存 DataAnalyzer（開閉率）にフィード
       analyzer.add(emaOpen);
 
-      
       if (openInfo) openInfo.textContent = `Open: ${Math.round(emaOpen)}%`;
-      if (dataPanel) {
+      if (closedInfo) {
         const isClosed = emaOpen < 20;
-        dataPanel.classList.toggle('eyes-closed', isClosed);
-        // Keep aria-hidden on the badge for screen readers as well
-        if (closedInfo) closedInfo.setAttribute("aria-hidden", isClosed ? "false" : "true");
+        closedInfo.setAttribute("aria-hidden", isClosed ? "false" : "true");
       }
     }
 
@@ -192,6 +208,40 @@ document.addEventListener("DOMContentLoaded", () => {
     if (closedInfo) closedInfo.setAttribute("aria-hidden", "true");
   });
 
+function renderFinalResults(panel, gazeRes) {
+  if (!panel || !gazeRes) return;
+  let box = document.getElementById("finalResultsBox");
+  if (!box) {
+    box = document.createElement("section");
+    box.id = "finalResultsBox";
+    box.style.marginTop = "12px";
+    box.style.padding = "10px";
+    box.style.borderTop = "1px solid #ddd";
+    box.style.background = "rgba(255,255,255,0.6)";
+    const coordLog = panel.querySelector("#coordLog");
+    if (coordLog?.parentNode) {
+      coordLog.parentNode.insertBefore(box, coordLog);
+    } else {
+      panel.appendChild(box);
+    }
+  }
+  const L = Math.max(0, Math.min(100, Math.round(gazeRes.left  ?? 0)));
+  const R = Math.max(0, Math.min(100, Math.round(gazeRes.right ?? 0)));
+  const N = Math.max(0, Math.min(100, Math.round(gazeRes.none  ?? 0)));
+  const dur = Math.max(0, gazeRes.durationSec ?? 0);
+  const tot = Math.max(0, gazeRes.samplesTotal ?? 0);
+
+  box.innerHTML = `
+    <h4 style="margin:0 0 6px;">最終結果</h4>
+    <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:baseline;">
+      <div>左: <b>${L}%</b>　右: <b>${R}%</b>　領域外: <b>${N}%</b></div>
+      <small style="opacity:.8">計測 ${dur}s・samples:${tot}</small>
+    </div>
+  `;
+}
+
+
+
   // ===== Utility =====
   function setBtnState(running) {
     if (btnToggle) {
@@ -204,4 +254,72 @@ document.addEventListener("DOMContentLoaded", () => {
   function clamp(x, min = 0, max = 1) {
     return Math.max(min, Math.min(max, x));
   }
+
+  // ===== 追加: 視線割合の集計ロジック =====
+  function setupGazeAggregation(){
+    // 初期化
+    gazeCounts = { left: 0, right: 0, oob: 0, totalIn: 0 };
+    gazeStartedAt = performance.now();
+
+    // キャリブ側が dispatch しているイベントを購読（detail.ux を使用）
+    // in-bounds: detail.ux [0..1]（0.5未満=左、以上=右）
+    onGazeIn = (ev) => {
+      const ux = ev?.detail?.ux;
+      if (typeof ux !== "number") return;
+      if (ux < 0.5) gazeCounts.left += 1;
+      else          gazeCounts.right += 1;
+      gazeCounts.totalIn += 1;
+      // console.debug("[Gaze] in ux=", ux.toFixed(3));
+    };
+    onGazeOOB = () => {
+      gazeCounts.oob += 1;
+      // console.debug("[Gaze] out-of-bounds");
+    };
+
+    window.addEventListener("gaze:in_bounds", onGazeIn);
+    window.addEventListener("gaze:out_of_bounds", onGazeOOB);
+
+    console.log("[Main] 視線割合集計を開始");
+  }
+
+  function teardownGazeAggregation(){
+    if (onGazeIn)  window.removeEventListener("gaze:in_bounds", onGazeIn);
+    if (onGazeOOB) window.removeEventListener("gaze:out_of_bounds", onGazeOOB);
+    const durMs = performance.now() - gazeStartedAt;
+
+    const leftCount  = gazeCounts?.left  || 0;
+    const rightCount = gazeCounts?.right || 0;
+    const noneCount  = gazeCounts?.oob   || 0;     // ← 見てない（out of bounds）
+    const inCount    = gazeCounts?.totalIn || 0;
+
+    const totalSamples = leftCount + rightCount + noneCount;
+    const denom = Math.max(1, totalSamples);       // 0割回避
+
+    const pL = Math.round((leftCount  / denom) * 100);
+    const pR = Math.round((rightCount / denom) * 100);
+    const pN = Math.round((noneCount  / denom) * 100);
+
+    const result = {
+      // 割合（合計≒100%）
+      left: pL,
+      right: pR,
+      none: pN,
+      // 素のカウントも残す
+      leftCount,
+      rightCount,
+      noneCount,
+      // 参考情報
+      samplesIn: inCount,
+      samplesTotal: totalSamples,
+      durationSec: Math.round(durMs / 1000)
+    };
+
+    console.log("[Main] 視線割合集計結果:", result);
+
+    onGazeIn = null; onGazeOOB = null; gazeCounts = null;
+    return result;
+  }
+
+
+  
 });
