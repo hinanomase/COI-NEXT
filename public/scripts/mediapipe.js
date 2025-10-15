@@ -124,7 +124,7 @@ async function initFaceLandmarker() {
   faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: "https://storage.googleapis.com/mediapipe-assets/face_landmarker.task",
-      delegate: "GPU"
+      delegate: "CPU"
     },
     outputFaceBlendshapes: false,
     runningMode: "VIDEO",
