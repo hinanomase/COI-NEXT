@@ -49,30 +49,30 @@ document.addEventListener("DOMContentLoaded", () => {
   let autoStopTimer = null; // ← 自動停止用タイマーID
 
   // Service Worker 登録（PWA） — DOMContentLoaded の中に置く
-  if ('serviceWorker' in navigator) {
-    // service-worker.js is served from /public/, so the registration scope must be within /public/
-    navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-      .then(reg => {
-        console.log('ServiceWorker registered (scope: ' + reg.scope + ')');
+  // if ('serviceWorker' in navigator) {
+  //   // service-worker.js is served from /public/, so the registration scope must be within /public/
+  //   navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+  //     .then(reg => {
+  //       console.log('ServiceWorker registered (scope: ' + reg.scope + ')');
 
-        // 更新を検知してユーザーに通知するサンプル（任意）
-        reg.addEventListener('updatefound', () => {
-          const newSW = reg.installing;
-          newSW.addEventListener('statechange', () => {
-            if (newSW.state === 'installed') {
-              // 新しいコンテンツがキャッシュされ、次回ロード時に使われます
-              if (navigator.serviceWorker.controller) {
-                console.log('New content available - please refresh.');
-                // ここで UI を出して「更新」ボタンを促すなどの処理を入れる
-              } else {
-                console.log('Content cached for offline use.');
-              }
-            }
-          });
-        });
-      })
-      .catch(err => console.warn('ServiceWorker registration failed:', err));
-  }
+  //       // 更新を検知してユーザーに通知するサンプル（任意）
+  //       reg.addEventListener('updatefound', () => {
+  //         const newSW = reg.installing;
+  //         newSW.addEventListener('statechange', () => {
+  //           if (newSW.state === 'installed') {
+  //             // 新しいコンテンツがキャッシュされ、次回ロード時に使われます
+  //             if (navigator.serviceWorker.controller) {
+  //               console.log('New content available - please refresh.');
+  //               // ここで UI を出して「更新」ボタンを促すなどの処理を入れる
+  //             } else {
+  //               console.log('Content cached for offline use.');
+  //             }
+  //           }
+  //         });
+  //       });
+  //     })
+  //     .catch(err => console.warn('ServiceWorker registration failed:', err));
+  // }
 
   // ===== エージェントの表示/非表示 =====
   const hideAgents = () => {
@@ -187,6 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
         dividerToggle.click();
       }
     });
+    dividerToggle.click(); // 初期状態を collapsed に
   }
 
   // ===== MediaPipeフレーム更新 =====
