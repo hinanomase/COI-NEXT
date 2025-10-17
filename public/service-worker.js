@@ -7,8 +7,6 @@ const ASSETS_TO_CACHE = [
   './scripts/main.js',
   './scripts/mediapipe.js',
   './scripts/interactions.js',
-  './scripts/agent.js',
-  './scripts/audio.js',
   // 必要に応じて他の静的ファイルを追加
 ];
 

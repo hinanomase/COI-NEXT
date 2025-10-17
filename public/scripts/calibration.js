@@ -20,21 +20,41 @@ const GRID = [
 export async function runCalibration() {
   const canvas = document.getElementById("myCanvas3");
   const overlay = createAgentOverlay(canvas);
-  const ui = buildOverlayUI(document.getElementById("mpPreviewWrap")); // keep small panel
+  // build the UI inside the agent overlay wrapper so it appears on top of myCanvas3
+  const overlayWrapper = document.getElementById('agentCalibOverlay') || canvas;
+  const ui = buildOverlayUI(overlayWrapper); // place guide panel on myCanvas3 overlay
 
   try {
   // ========= 1) 開眼ベースライン（3秒） =========
-  setStep(ui, "開眼ベースライン", "自然に目を開けてください（3秒）");
+  // setStep(ui, "自然に目を開けて表示される青い点を見てください", "");
+  // overlay.place(0.5, 0.5);
+  // await sleep(350);
+  // const openSamples = await sampleEyeMetrics(3000);
+  // const openBaseline = summarizeOpenBaseline(openSamples); // EARの分位トリム
+  // overlay.hide();
+
+  // ========= 1b) 閉眼ベースライン（改良フロー） =========
+  // 流れ：指示を3秒表示 -> 消す -> 青い点を表示して開眼データを3秒取得 -> 点を消す
+  setStep(ui, "自然に目を開けて、表示される青い点を見てください", "");
+  await sleep(3000);
+  // clear instruction before showing the point
+  setStep(ui, "", "");
+  // show a single blue point at center and give a short moment to fixate
   overlay.place(0.5, 0.5);
+  if (ui && typeof ui.repositionAvoid === 'function') ui.repositionAvoid(0.5, 0.5);
   await sleep(350);
   const openSamples = await sampleEyeMetrics(3000);
   const openBaseline = summarizeOpenBaseline(openSamples); // EARの分位トリム
   overlay.hide();
 
-  // ========= 1b) 閉眼ベースライン（3秒） =========
-  // ユーザーに目を閉じてもらい、閉眼時の縦横比（完全閉眼の基準）も取る。
-  setStep(ui, "閉眼ベースライン", "目を閉じてください（3秒）");
-  await sleep(350);
+  // instruct to close eyes for 5s (we will sample 3s within that period)
+  setStep(ui, "この表示が消えたら目を5秒閉じてください", "");
+  // show the instruction briefly (so user reads it), then remove it before sampling
+  await sleep(3000);
+  // hide instruction
+  setStep(ui, "", "");
+  // wait 0.5s then sample closed eyes for 3s
+  await sleep(500);
   const closedSamples = await sampleEyeMetrics(3000);
   const closedBaseline = summarizeOpenBaseline(closedSamples);
 
@@ -42,14 +62,27 @@ export async function runCalibration() {
     const calibSamples = [];
     const N_PER_POINT = 90; // approx 3s @ 30fps
 
-    for (const [ux, uy] of GRID) {
-      setStep(ui, "視線キャリブレーション", `次の点を見てください`);
-      placeTargetOnAgent(overlay, ux, uy);
-      await sleep(250);
+    // show practice instruction: keep face still and follow the blue dot with eyes only
+    setStep(ui, "顔を動かさないように視線だけで青い点を追ってください", "");
+    await sleep(5000);
+    setStep(ui, "", "");
 
-      // collect features (Lx,Ly,Rx,Ry, faceCx, faceCy)
-      const feats = await sampleFeatures(N_PER_POINT * (1000/30)); // approximate ms
-      if (feats.length === 0) continue;
+    // iterate GRID from top-left to bottom-right
+    for (const [ux, uy] of GRID) {
+      // place target
+      placeTargetOnAgent(overlay, ux, uy);
+      // ensure the guide panel doesn't overlap the calibration point
+      if (ui && typeof ui.repositionAvoid === 'function') ui.repositionAvoid(ux, uy);
+      // show point, wait 0.5s for user to fixate
+      await sleep(500);
+
+      // collect features for 3s
+      const feats = await sampleFeatures(3000);
+      if (feats.length === 0) {
+        overlay.hideTarget();
+        await sleep(500);
+        continue;
+      }
       // median(robust)
       const med = feats[0].map((_,i) => {
         const col = feats.map(r=>r[i]).sort((a,b)=>a-b);
@@ -58,7 +91,9 @@ export async function runCalibration() {
       const px = ux * canvas.width;
       const py = uy * canvas.height;
       calibSamples.push({ feat: med, x: px, y: py });
+      // hide point and wait 0.5s before next
       overlay.hideTarget();
+      await sleep(500);
     }
 
     // 学習（FEAT -> W_x, W_y）
@@ -498,6 +533,9 @@ function summarizeOpenBaseline(samples){
 
 /* UI overlay helper (keep existing version or slightly adapt) */
 function buildOverlayUI(host){
+  // host: optional element to mount the UI into (e.g. overlay wrapper on myCanvas3)
+  const mount = host && host.appendChild ? host : document.body;
+
   const root = document.createElement("div");
   Object.assign(root, { id:"calibOverlay" });
   Object.assign(root.style,{
@@ -508,20 +546,23 @@ function buildOverlayUI(host){
   const panel = document.createElement("div");
   Object.assign(panel, { id:"calibPanel" });
   Object.assign(panel.style,{
-    pointerEvents:"auto", alignSelf:"start", justifySelf:"center",
-    marginTop:"12px", background:"rgba(10,14,26,.75)", color:"#e6e9ef",
+    pointerEvents:"auto", alignSelf:"center", justifySelf:"center",
+    marginTop:"0px", background:"rgba(10,14,26,.85)", color:"#e6e9ef",
     border:"1px solid rgba(255,255,255,.12)", borderRadius:"10px",
-    padding:"8px 12px", font:"600 14px system-ui, sans-serif",
-    textAlign:"center", boxShadow:"0 10px 24px rgba(0,0,0,.35)"
+    padding:"10px 14px", font:"600 14px system-ui, sans-serif",
+    textAlign:"center", boxShadow:"0 10px 24px rgba(0,0,0,.45)",
+    maxWidth: "360px",
+    // start hidden: when there is no text we want the whole panel to be invisible (not just empty)
+    display: 'none',
   });
 
   const title = document.createElement("div");
   title.id="calibTitle";
-  title.textContent="キャリブレーション";
+  title.textContent=""; // start empty (don't show initial 'キャリブレーション')
 
   const desc = document.createElement("div");
   desc.id="calibDesc";
-  Object.assign(desc.style,{ fontSize:"12px", opacity:"0.85" });
+  Object.assign(desc.style,{ fontSize:"13px", opacity:"0.95", marginTop: "6px" });
 
   panel.appendChild(title); panel.appendChild(desc);
 
@@ -538,13 +579,75 @@ function buildOverlayUI(host){
 
   stage.appendChild(target);
   root.appendChild(panel); root.appendChild(stage);
-  (host || document.body).appendChild(root);
+  mount.appendChild(root);
+
+  // repositionAvoid: keep panel near center but avoid overlapping a point at ux,uy (0..1)
+  function repositionAvoid(ux, uy) {
+    try {
+      // mount is expected to be the overlay wrapper positioned over the canvas
+      const mr = mount.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+
+      // desired center position in page coords: center of mount
+      const centerX = mr.left + mr.width/2;
+      const centerY = mr.top + mr.height/2;
+
+      // point page coords
+      const px = mr.left + ux * mr.width;
+      const py = mr.top + uy * mr.height;
+
+      // if the point would overlap the panel's bounding box at center, nudge panel up or down
+      const halfH = panelRect.height / 2;
+      const halfW = panelRect.width / 2;
+
+      // target relative to center
+      const relY = py - centerY;
+      const relX = px - centerX;
+
+      let offsetY = 0;
+      // overlap if abs(relY) < halfH + padding and abs(relX) < halfW + padding
+      const padding = 12;
+      if (Math.abs(relX) < (halfW + padding) && Math.abs(relY) < (halfH + padding)) {
+        // push panel away vertically: if point is above center, move panel down, else move up
+        offsetY = (relY < 0) ? (halfH + padding - relY) : -(halfH + padding + relY);
+      }
+
+      // clamp offset so panel stays within mount bounds
+      const maxOffsetY = Math.max(0, (mr.height/2) - halfH - 8);
+      offsetY = Math.max(-maxOffsetY, Math.min(maxOffsetY, offsetY));
+
+      // ensure panel is positioned absolutely centered first, then apply vertical offset
+      panel.style.position = 'absolute';
+      panel.style.left = '50%';
+      panel.style.top = '50%';
+      // keep base transform as centered; repositionAvoid will modify translateY portion only
+      panel.style.transform = `translate(calc(-50%), calc(-50% + ${Math.round(offsetY)}px))`;
+    } catch (e) { /* ignore */ }
+  }
+
+  // central helper: set title/desc and toggle panel visibility as a whole.
+  function setTextInternal(t, d) {
+    title.textContent = t || "";
+    desc.textContent = d || "";
+    // if both are empty, hide the entire panel (including border/background)
+    if ((!title.textContent || title.textContent.trim() === "") && (!desc.textContent || desc.textContent.trim() === "")) {
+      panel.style.display = 'none';
+    } else {
+      // ensure visible and reset transform to centered baseline so repositionAvoid can nudge from center
+      panel.style.display = '';
+      panel.style.position = 'absolute';
+      panel.style.left = '50%';
+      panel.style.top = '50%';
+      panel.style.transform = 'translate(-50%, -50%)';
+    }
+  }
 
   return {
     root,
-    setText:(t,d)=>{ title.textContent=t||""; desc.textContent=d||""; },
+    setText: setTextInternal,
     setTarget:(x,y)=>{ target.style.left=`${x*100}%`; target.style.top=`${y*100}%`; target.style.opacity="1"; },
     hideTarget:()=>{ target.style.opacity="0"; },
+    repositionAvoid,
   };
 }
 function setStep(ui, t, d, done=false){ ui?.setText(t,d); if(done) ui?.hideTarget(); }

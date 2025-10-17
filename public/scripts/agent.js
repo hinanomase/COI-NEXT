@@ -325,7 +325,7 @@ export async function initAgentsSequentially(debug = false) {
 
   return Agents;
 }
-initAgentsSequentially();
+// initAgentsSequentially();
 // export const Agents = {
 //   left: AgentLeft,
 //   right: AgentRight,
