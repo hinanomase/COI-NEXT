@@ -36,11 +36,127 @@ document.addEventListener("DOMContentLoaded", () => {
   const dataPanel = document.getElementById("dataPanel");
   const analyzer = new DataAnalyzer(20);
 
+  // ===== 画像描画ヘルパー（キャンバスに画像をフィット描画、切替対応） =====
+  const __canvasControllers = {};
+  function createCanvasImageController(canvasId, src, opts = {}) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return null;
+    // ensure canvas backing store matches CSS size for sharp rendering
+    const ctx = canvas.getContext('2d');
+    let img = new Image();
+    let currentSrc = null;
+    const alignment = opts.alignment || 'center'; // 'left' | 'right' | 'center'
+    const margin = (typeof opts.margin === 'number') ? opts.margin : 12; // CSS pixels
+
+    function ensureSize() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      // debug: log rect so we can see if canvas is laid out
+      if (typeof console !== 'undefined' && console.debug) {
+        console.debug('[Main] ensureSize', canvasId, 'rect=', {w: rect.width, h: rect.height, dpr});
+      }
+      const desiredW = Math.max(1, Math.round(rect.width * dpr));
+      const desiredH = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width !== desiredW || canvas.height !== desiredH) {
+        canvas.width = desiredW;
+        canvas.height = desiredH;
+        // scale drawing context to account for DPR
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+    }
+
+    function render() {
+      if (!img || !img.naturalWidth) return;
+      ensureSize();
+      // note: ctx has been transform-scaled for DPR so use CSS pixels
+      const dpr = window.devicePixelRatio || 1;
+      const cw = canvas.width / dpr, ch = canvas.height / dpr;
+      // maintain aspect ratio but prefer filling vertical available space so top/bottom gaps ~= margin
+      const targetW = Math.max(1, cw - 2 * margin);
+      const targetH = Math.max(1, ch - 2 * margin);
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      // prefer scaling so image height == targetH (so top/bottom gap == margin)
+      let scale = targetH / ih;
+      let w = Math.round(iw * scale), h = Math.round(ih * scale);
+      // if that makes the image too wide for horizontal target, clamp to targetW
+      if (w > targetW) {
+        scale = targetW / iw;
+        w = Math.round(iw * scale);
+        h = Math.round(ih * scale);
+      }
+      // x: aligned to left/right/center within available area
+      let x;
+      if (alignment === 'left') {
+        x = margin;
+      } else if (alignment === 'right') {
+        x = Math.round(cw - margin - w);
+      } else {
+        x = Math.round((cw - w) / 2);
+      }
+      // y: center vertically within area between margins so top/bottom gaps ~= margin
+      const y = Math.round(margin + ((targetH - h) / 2));
+      ctx.clearRect(0, 0, cw, ch);
+      ctx.drawImage(img, x, y, w, h);
+    }
+
+    function setSrc(s) {
+      if (!s) return;
+      if (s === currentSrc && img && img.naturalWidth) return;
+      currentSrc = s;
+      img = new Image();
+      img.onload = () => { try { 
+          console.debug('[Main] image loaded', canvasId, s, 'natural=', img.naturalWidth+'x'+img.naturalHeight);
+          render();
+        } catch(e){} };
+      img.onerror = () => { console.warn('[Main] failed to load image', s); };
+      img.src = s;
+    }
+
+    // expose
+    const ctrl = { setSrc, refresh: render, img };
+    __canvasControllers[canvasId] = ctrl;
+    // if a src was provided, set it after a short delay to allow layout
+    if (src) setTimeout(() => setSrc(src), 250);
+    return ctrl;
+  }
+
+    // initialize left/right canvases with default emotion images (left-aligned / right-aligned)
+  const leftImg = createCanvasImageController('myCanvas1', 'assets/img/joy1.png', { alignment: 'left', margin: 12 });
+  const rightImg = createCanvasImageController('myCanvas2', 'assets/img/sad1.png', { alignment: 'right', margin: 12 });
+  // global helper for runtime switching (for debugging/testing)
+  window.setCanvasImage = (canvasId, src) => {
+    const c = __canvasControllers[canvasId]; if (c) c.setSrc(src); else console.warn('no canvas controller', canvasId);
+  };
+
+  // debug helpers: inspect sizes and force redraw from console
+  window.debugCanvasInfo = () => {
+    ['myCanvas1','myCanvas2'].forEach(id => {
+      const canvas = document.getElementById(id);
+      if (!canvas) { console.warn('no canvas', id); return; }
+      const wrap = canvas.closest('.canvas-square');
+      console.group(`canvas:${id}`);
+      console.log('elementRect:', canvas.getBoundingClientRect());
+      if (wrap) console.log('wrapperRect:', wrap.getBoundingClientRect());
+      const cs = window.getComputedStyle(wrap || canvas);
+      console.log('display:', cs.display, 'visibility:', cs.visibility, 'width/height:', cs.width, cs.height);
+      console.groupEnd();
+    });
+    console.log('agent-row:', document.querySelector('.agent-row')?.getBoundingClientRect());
+    console.log('topGrid:', document.getElementById('topGrid')?.getBoundingClientRect());
+  };
+
+  window.refreshCanvas = (canvasId) => {
+    const c = __canvasControllers[canvasId]; if (c && typeof c.refresh === 'function') { c.refresh(); console.log('[Main] refreshed', canvasId); }
+    else console.warn('no refreshable canvas controller for', canvasId);
+  };
+
   // ===== 追加: 視線集計用の状態 =====
   let gazeStartedAt = 0;
   let gazeCounts = null;
   let onGazeIn = null;
   let onGazeOOB = null;
+  // normalized openRatio series (ema used for display)
+  window.__normalizedOpenSeries = window.__normalizedOpenSeries || [];
 
   // ===== 状態 =====
   let isRunning = false;
@@ -75,17 +191,23 @@ document.addEventListener("DOMContentLoaded", () => {
   // }
 
   // ===== エージェントの表示/非表示 =====
-  const hideAgents = () => {
-    if (canvas1) canvas1.style.display = "none";
-    if (canvas2) canvas2.style.display = "none";
+  const hideImages = () => {
+    const wrap1 = canvas1?.closest('.canvas-square');
+    const wrap2 = canvas2?.closest('.canvas-square');
+    if (wrap1) wrap1.style.display = 'none'; else if (canvas1) canvas1.style.display = 'none';
+    if (wrap2) wrap2.style.display = 'none'; else if (canvas2) canvas2.style.display = 'none';
   };
-  const showAgents = () => {
-    if (canvas1) canvas1.style.display = "block";
-    if (canvas2) canvas2.style.display = "block";
+  const showImages = () => {
+    const wrap1 = canvas1?.closest('.canvas-square');
+    const wrap2 = canvas2?.closest('.canvas-square');
+    if (wrap1) wrap1.style.display = 'block'; else if (canvas1) canvas1.style.display = 'block';
+    if (wrap2) wrap2.style.display = 'block'; else if (canvas2) canvas2.style.display = 'block';
   };
 
   // 初期状態：非表示
-  hideAgents();
+  // hideImages();
+  showImages();
+  // btnToggle.style.display = 'none';
 
   // ===== Start / Stop =====
   const handleStart = async () => {
@@ -93,7 +215,7 @@ document.addEventListener("DOMContentLoaded", () => {
     isRunning = true;
     setBtnState(true);
     btnToggle.style.display = 'none';
-    hideAgents();
+    hideImages();
 
     try {
       console.log("[Main] Start → MediaPipe初期化");
@@ -102,13 +224,15 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("[Main] キャリブレーション開始");
       calib = await runCalibration();
 
-      analyzer.reset();
+  analyzer.reset();
+  // reset normalized series
+  window.__normalizedOpenSeries = [];
 
       // === 視線割合の集計を開始（キャリブ完了後〜Stopまで） ===
       setupGazeAggregation();
 
       console.log("[Main] キャリブレーション完了 → エージェント表示");
-      showAgents();
+      showImages();
 
       // 10秒後に自動停止
       if (autoStopTimer) clearTimeout(autoStopTimer);
@@ -122,7 +246,7 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("キャリブレーションまたは初期化に失敗しました。");
       isRunning = false;
       setBtnState(false);
-      hideAgents();
+      hideImages();
       teardownGazeAggregation(); // 念のため
     }
   };
@@ -140,19 +264,34 @@ document.addEventListener("DOMContentLoaded", () => {
       autoStopTimer = null;
     }
 
+    // compute final gaze aggregation now so we can include it in saved files
+    const gazeResult = (typeof teardownGazeAggregation === "function")
+      ? teardownGazeAggregation()
+      : (window.__lastGazeResult || {left:0,right:0,durationSec:0,samplesIn:0,oobSamples:0});
+    // expose for saving
+    window.__lastGazeResult = gazeResult;
+
+    // compute open/close summary from DataAnalyzer and expose for saving
+    try {
+      const openSummary = analyzer.summarize();
+      window.__lastOpenSummary = openSummary;
+    } catch (e) {
+      console.warn('[Main] failed to produce open summary for saving', e);
+      window.__lastOpenSummary = null;
+    }
+
     try { await sendEyeLandmarkData(); } catch {}
     try { await stopMediaPipeAll(); } catch {}
 
-    hideAgents();
+    hideImages();
 
   
     // 既存の開閉統計を先に描画
     analyzer.renderToPanel(dataPanel);
 
-    const gazeResult = (typeof teardownGazeAggregation === "function")
-      ? teardownGazeAggregation()           // 直前までの集計関数がある場合
-      : (window.__lastGazeResult || {left:0,right:0,durationSec:0,samplesIn:0,oobSamples:0});
-    renderFinalResults(dataPanel, gazeResult);
+    // render the final results (gazeResult already computed above)
+    const gazeResultToRender = window.__lastGazeResult || {left:0,right:0,durationSec:0,samplesIn:0,oobSamples:0};
+    renderFinalResults(dataPanel, gazeResultToRender);
 
 
     emaOpen = null;
@@ -213,6 +352,19 @@ document.addEventListener("DOMContentLoaded", () => {
       if (closedInfo) {
         const isClosed = emaOpen < 20;
         closedInfo.setAttribute("aria-hidden", isClosed ? "false" : "true");
+      }
+
+      // 保存用: UI 表示と一致する正規化系列を記録（timestamp + EMA + raw% + norm）
+      try {
+        window.__normalizedOpenSeries = window.__normalizedOpenSeries || [];
+        window.__normalizedOpenSeries.push({
+          ts: ts || Date.now(),
+          ema: Number((emaOpen || 0).toFixed(2)),
+          rawOpenPct: Number((openPctRaw || 0).toFixed(2)),
+          norm: Number((norm || 0).toFixed(4))
+        });
+      } catch (e) {
+        console.warn('[Main] failed to push normalized open series', e);
       }
     }
 

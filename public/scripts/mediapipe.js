@@ -1,5 +1,6 @@
 // public/scripts/mediapipe.js
 import { BACKEND_URL, EYE_LANDMARKS } from "./config.js";
+import { computeEyeOpenRatio } from "./calibration.js";
 import {
   FilesetResolver,
   FaceLandmarker
@@ -8,7 +9,14 @@ import {
 let collecting = false;     // データ収集フラグ
 let running = false;        // 推論ループ稼働フラグ（Stopでfalseに）
 let startTime = 0;
-let collectedData = [];
+// split storage: meta + per-frame eye landmarks (only EYE_LANDMARKS) + gaze points + open ratios
+let collectedMeta = {};
+let collectedEyeFrames = [];
+let collectedGazeFrames = [];
+// raw open ratios are not stored anymore; use normalizedOpenSeries (from main.js) instead
+let collectedOpenRatios = null;
+// backward-compatible container (some code may still reference collectedData)
+let collectedData = null;
 
 let faceLandmarker;
 let videoEl;
@@ -27,7 +35,13 @@ export async function mediapipeInitAndStart() {
   }
 
   // フラグ類
-  collectedData = [];
+  // reset split storage
+  collectedMeta = { startedAt: performance.now() };
+  collectedEyeFrames = [];
+  collectedGazeFrames = [];
+  // collectedOpenRatios intentionally left null
+  // compatibility: provide an alias array for collectedData that mirrors eyeFrames
+  collectedData = collectedEyeFrames;
   startTime = performance.now();
   collecting = true;
   running = true;
@@ -73,18 +87,46 @@ export async function stopMediaPipeAll() {
 
 /** サーバ送信（必要に応じて） */
 export async function sendEyeLandmarkData() {
-  const session_id = getOrCreateSessionId();
+  // Save collectedData to a local JSON file (trigger download)
   try {
-    const resp = await fetch(`${BACKEND_URL}/api/eye-landmarks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id, data: collectedData })
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    console.log(`[MediaPipe] Saved ${collectedData.length} frames`);
+    const session_id = getOrCreateSessionId();
+    const ts = Date.now();
+    const baseName = `eye_capture_${session_id}_${ts}`;
+  // NOTE: meta is included in finalResults.json, so do not emit a separate meta JSON to avoid duplication
+    // eye frames
+    const eyeBlob = new Blob([JSON.stringify(collectedEyeFrames, null, 2)], { type: 'application/json' });
+    downloadBlob(eyeBlob, `${baseName}_eyeFrames.json`);
+    // gaze frames
+    const gazeBlob = new Blob([JSON.stringify(collectedGazeFrames, null, 2)], { type: 'application/json' });
+    downloadBlob(gazeBlob, `${baseName}_gazeFrames.json`);
+  // NOTE: raw openRatios are no longer emitted; use normalizedOpenSeries.json instead
+
+    // additional: normalized open series from main.js (if present)
+    try {
+      const norm = window.__normalizedOpenSeries || [];
+      const normBlob = new Blob([JSON.stringify(norm, null, 2)], { type: 'application/json' });
+      downloadBlob(normBlob, `${baseName}_normalizedOpenSeries.json`);
+    } catch(e){}
+
+    // additional: final combined results (open summary + gaze summary)
+    // NOTE: normalizedOpenSeries and meta are NOT duplicated here (meta is included but meta.json not emitted separately)
+    try {
+      const openSummary = window.__lastOpenSummary || null;
+      const gazeSummary = window.__lastGazeResult || null;
+      const finalResults = { session_id, ts, meta: collectedMeta, openSummary, gazeSummary };
+      const finalBlob = new Blob([JSON.stringify(finalResults, null, 2)], { type: 'application/json' });
+      downloadBlob(finalBlob, `${baseName}_finalResults.json`);
+    } catch(e){}
+
+  console.log(`[MediaPipe] Downloaded data files (eye:${collectedEyeFrames.length}, gaze:${collectedGazeFrames.length})`);
   } catch (e) {
-    console.error("[MediaPipe] Save failed", e);
+    console.error('[MediaPipe] failed to save locally', e);
   }
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
 /* ===== 内部処理 ===== */
@@ -124,7 +166,7 @@ async function initFaceLandmarker() {
   faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: "https://storage.googleapis.com/mediapipe-assets/face_landmarker.task",
-      delegate: "CPU"
+      delegate: "GPU"
     },
     outputFaceBlendshapes: false,
     runningMode: "VIDEO",
@@ -158,10 +200,25 @@ function loop() {
       detail: { ts: now, count: eye.length, eye }
     }));
 
-    // 記録
+    // compute open ratio per-frame from eye array (not full landmarks)
+    let openRatio = null;
+    try { openRatio = computeEyeOpenRatio(eye).avg; } catch (e) { openRatio = null; }
+
+    // get gaze from last recorded gaze point if available (set by calibration.js)
+    const lastGaze = window.__lastGazePoint || null;
+
+    // Save only eye landmarks (subset) for lightweight storage
+    const eyeOnly = EYE_LANDMARKS.map(i => ({ idx: i, x: +(landmarks[i].x).toFixed(4), y: +(landmarks[i].y).toFixed(4), z: +(landmarks[i].z ?? 0).toFixed(4) }));
+
+  // persist per-frame into separate arrays
+  collectedEyeFrames.push({ ts: now, eye: eyeOnly });
+  collectedGazeFrames.push({ ts: now, gaze: lastGaze });
+  // raw openRatio intentionally not stored; normalized series from main.js is saved separately
+
+    // 記録 フラグにより追加処理可能
     if (collecting) {
-      const elapsed = performance.now() - startTime;
-      collectedData.push({ elapsed, eyeLandmarks: EYE_LANDMARKS.map(i => landmarks[i]) });
+      // keep collectedMeta alive (e.g., session start ts)
+      if (!collectedMeta.startedAt) collectedMeta.startedAt = startTime;
     }
   }
 

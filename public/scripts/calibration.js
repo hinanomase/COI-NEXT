@@ -128,7 +128,7 @@ export async function runCalibration() {
    =========================== */
 
 // FEAT vector: [1, features..., quadratic terms...]
-const FEAT = (f) => [1, ...f, ...poly2(f)];
+export const FEAT = (f) => [1, ...f, ...poly2(f)];
 function poly2(v){
   const out = [];
   for(let i=0;i<v.length;i++) out.push(v[i]*v[i]);
@@ -176,7 +176,7 @@ function solveLinearSystem(A, b){
  * mp:eye_frame の e.detail.eye は EYE_LANDMARKS に対応する
  * { idx, x, y, z } の配列です。ここから eyeFeatures を算出する。
  */
-function computeFeatureFromEye(eyeArray) {
+export function computeFeatureFromEye(eyeArray) {
   const m = new Map(eyeArray.map(p => [p.idx, p]));
   const L_IN=133, L_OUT=33, R_IN=362, R_OUT=263;
   const L_IRIS=[468,469,470,471,472], R_IRIS=[473,474,475,476,477];
@@ -316,49 +316,49 @@ export function startGazeVisualization(coeffs) {
 
   // listener
   _gazeListener = (e) => {
-    // if preview is collapsed, do nothing (hide overlay)
     const app = document.getElementById('app');
     const collapsed = app && app.classList && app.classList.contains('preview-collapsed');
-    if (collapsed) { if (_gazeOverlay) _gazeOverlay.hideTarget(); return; }
 
     const feat = computeFeatureFromEye(e.detail.eye);
+    const c1 = document.getElementById('myCanvas1');
+    const c2 = document.getElementById('myCanvas2');
+    const r1 = c1 ? c1.getBoundingClientRect() : null;
+    const r2 = c2 ? c2.getBoundingClientRect() : null;
+
     if (!feat) {
-      _gazeOverlay.hideTarget();
+      // no landmarks -> treat as out-of-bounds for aggregation
+      const canvasRect = canvas.getBoundingClientRect();
+      const pageX = canvasRect.left; const pageY = canvasRect.top;
+      window.dispatchEvent(new CustomEvent('gaze:out_of_bounds', { detail: { pageX, pageY, canvas1Rect: r1, canvas2Rect: r2 } }));
+      if (!collapsed && _gazeOverlay) _gazeOverlay.hideTarget();
       return;
     }
+
     const f = FEAT(feat);
     const dot = (w) => f.reduce((s,v,i)=>s + v * (w[i]||0), 0);
     let px = dot(_gazeW.W_x), py = dot(_gazeW.W_y);
+      // expose latest gaze point for capture (page/canvas pixels and normalized ux/uy)
+      try { window.__lastGazePoint = { px, py, ux: px / canvas.width, uy: py / canvas.height }; } catch(e) { window.__lastGazePoint = null; }
 
     // determine whether gaze (px,py) on myCanvas3 maps into myCanvas1 or myCanvas2
     const canvasRect = canvas.getBoundingClientRect();
     const pageX = canvasRect.left + (px / canvas.width) * canvasRect.width;
     const pageY = canvasRect.top  + (py / canvas.height) * canvasRect.height;
 
-    const c1 = document.getElementById('myCanvas1');
-    const c2 = document.getElementById('myCanvas2');
-    const r1 = c1 ? c1.getBoundingClientRect() : null;
-    const r2 = c2 ? c2.getBoundingClientRect() : null;
-
     const in1 = r1 && pageX >= r1.left && pageX <= r1.right && pageY >= r1.top && pageY <= r1.bottom;
     const in2 = r2 && pageX >= r2.left && pageX <= r2.right && pageY >= r2.top && pageY <= r2.bottom;
 
     if (!in1 && !in2) {
       // outside both target canvases -> out of bounds
-      const ev = new CustomEvent('gaze:out_of_bounds', { detail: { pageX, pageY, canvas1Rect: r1, canvas2Rect: r2 } });
-      window.dispatchEvent(ev);
-      // Instead of hiding the marker, clamp it to the canvas edge and color red so it's always visible
-      try { canvas.style.backgroundColor = 'rgba(255,64,64,0.12)'; } catch (e) {}
-
-      // px/py are in canvas pixels; clamp to [0, width/height]
-      const clampedPx = clamp(px, 0, canvas.width);
-      const clampedPy = clamp(py, 0, canvas.height);
-      const uxEdge = clampedPx / canvas.width;
-      const uyEdge = clampedPy / canvas.height;
-      try {
-        _gazeOverlay.setColor('#ff3333');
-        _gazeOverlay.place(uxEdge, uyEdge);
-      } catch (e) { _gazeOverlay.hideTarget(); }
+      window.dispatchEvent(new CustomEvent('gaze:out_of_bounds', { detail: { pageX, pageY, canvas1Rect: r1, canvas2Rect: r2 } }));
+      if (!collapsed) {
+        try { canvas.style.backgroundColor = 'rgba(255,64,64,0.12)'; } catch (e) {}
+        const clampedPx = clamp(px, 0, canvas.width);
+        const clampedPy = clamp(py, 0, canvas.height);
+        const uxEdge = clampedPx / canvas.width;
+        const uyEdge = clampedPy / canvas.height;
+        try { _gazeOverlay.setColor('#ff3333'); _gazeOverlay.place(uxEdge, uyEdge); } catch (e) { if (_gazeOverlay) _gazeOverlay.hideTarget(); }
+      }
       return;
     }
 
@@ -378,13 +378,15 @@ export function startGazeVisualization(coeffs) {
       _gazeSmoother.y = _gazeSmoother.y * (1 - alpha) + uy * alpha;
     }
 
-  // clear any OOB tint when gaze returns in-bounds and restore marker color
-  try { canvas.style.backgroundColor = ''; _gazeOverlay.setColor('#2d7ff9'); } catch (e) {}
-
-  _gazeOverlay.place(_gazeSmoother.x, _gazeSmoother.y);
-    // in-bounds notification (optional)
+    // dispatch in-bounds for aggregation
     const inEv = new CustomEvent('gaze:in_bounds', { detail: { px, py, ux: _gazeSmoother.x, uy: _gazeSmoother.y } });
     window.dispatchEvent(inEv);
+
+    if (!collapsed) {
+      // clear any OOB tint when gaze returns in-bounds and restore marker color
+      try { canvas.style.backgroundColor = ''; _gazeOverlay.setColor('#2d7ff9'); } catch (e) {}
+      _gazeOverlay.place(_gazeSmoother.x, _gazeSmoother.y);
+    }
   };
 
   window.addEventListener("mp:eye_frame", _gazeListener);
