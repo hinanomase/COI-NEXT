@@ -131,7 +131,7 @@ export async function runCalibration() {
       }
     } catch(e) { /* keep defaults on error */ }
 
-    setStep(ui, "キャリブ完了", "ありがとうございます。測定を開始します。", true);
+    // setStep(ui, "キャリブ完了", "ありがとうございます。測定を開始します。", true);
     await sleep(600);
 
     // キャリブ完了後、自動で視線可視化を開始する

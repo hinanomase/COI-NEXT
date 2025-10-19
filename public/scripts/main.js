@@ -11,6 +11,10 @@ import {
   sendEyeLandmarkData,
   stopMediaPipeAll,
   resetCollectedData,
+  startCollecting,
+  stopCollecting,
+  pauseProcessing,
+  resumeProcessing,
 } from "./mediapipe.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
 import { DataAnalyzer } from "./dataAnalyzer.js";
@@ -36,6 +40,202 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const dataPanel = document.getElementById("dataPanel");
   const analyzer = new DataAnalyzer(20);
+
+  // participant name (filled by modal)
+  let participantNameRaw = null; // human-readable, may contain Japanese
+  let participantNameSafe = null; // file-safe encoded name
+
+  toggleDebugMode(true);
+
+  // create a simple modal for participant name input
+  function createNameModal() {
+    const modal = document.createElement('div');
+    modal.id = 'nameModal';
+    Object.assign(modal.style, { position: 'fixed', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', zIndex: 20000 });
+    const box = document.createElement('div');
+    Object.assign(box.style, { background: '#fff', padding: '18px', borderRadius: '8px', minWidth: '320px', textAlign: 'center' });
+    const title = document.createElement('div'); title.textContent = '参加者情報'; title.style.fontWeight = '700'; title.style.marginBottom = '8px'; title.style.color = 'black';
+    const desc = document.createElement('div'); desc.textContent = '名前を入力してください'; desc.style.marginBottom = '10px'; desc.style.color = 'black';
+    const input = document.createElement('input'); input.type = 'text'; input.placeholder = '氏名'; input.style.width = '100%'; input.style.padding = '8px'; input.style.marginBottom = '10px';
+    const btn = document.createElement('button'); btn.textContent = '開始'; btn.style.padding = '8px 12px'; btn.style.cursor = 'pointer';
+    box.appendChild(title); box.appendChild(desc); box.appendChild(input); box.appendChild(btn);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+    btn.addEventListener('click', () => {
+      const v = (input.value || '').trim();
+      if (!v) { input.style.border = '1px solid #f44'; return; }
+      participantNameRaw = v;
+      try { participantNameSafe = encodeURIComponent(participantNameRaw); } catch(e) { participantNameSafe = participantNameRaw.replace(/[/\\]/g,'_'); }
+      modal.remove();
+      // after name entry, automatically start the main Start flow (user gesture performed)
+      setTimeout(() => { if (typeof btnStart?.click === 'function') btnStart.click(); else handleStart(); }, 50);
+    });
+    return modal;
+  }
+
+  // simple overlay message (center) for short notifications
+  function showMessage(text, secs=3) {
+    const id = 'mainMessageOverlay';
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div'); el.id = id;
+      Object.assign(el.style, { position: 'fixed', background: 'rgba(0,0,0,0.8)', color: '#fff', padding: '12px 18px', borderRadius: '8px', zIndex: 15000, fontWeight: 600 });
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    // position centered over myCanvas3 (both horizontally and vertically)
+    const canvas3 = document.getElementById('myCanvas3');
+    if (canvas3) {
+      const r = canvas3.getBoundingClientRect();
+      // center point of canvas3
+      el.style.left = (r.left + r.width / 2) + 'px';
+      el.style.top = (r.top + r.height / 2) + 'px';
+      // translate to truly center on both axes
+      el.style.transform = 'translate(-50%, -50%)';
+      // constrain overlay width relative to canvas
+      el.style.maxWidth = Math.max(180, Math.round(r.width * 0.9)) + 'px';
+      el.style.textAlign = 'center';
+    } else {
+      el.style.left = '50%'; el.style.top = '50%'; el.style.transform = 'translate(-50%, -50%)';
+    }
+    el.style.display = '';
+    if (secs > 0) setTimeout(() => { try { el.style.display = 'none'; } catch(e){} }, secs*1000);
+  }
+
+  // show a countdown timer overlay for minutes (used for 5min rest)
+  function showTimer(minutes) {
+    const id = 'mainTimerOverlay';
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div'); el.id = id;
+      Object.assign(el.style, { position: 'fixed', left: '50%', top: '20%', transform: 'translateX(-50%)', background: 'rgba(255,255,255,0.95)', color: '#000', padding: '16px 22px', borderRadius: '8px', zIndex: 15000, textAlign: 'center', fontSize: '20px', fontWeight: 700 });
+      // create a dedicated text container
+      const txt = document.createElement('div'); txt.className = 'main-timer-text'; txt.style.margin = '0';
+      el.appendChild(txt);
+      document.body.appendChild(el);
+    }
+
+    let remain = minutes * 60;
+    // ensure any previous interval is cleared
+    try { if (el._timerInterval) { clearInterval(el._timerInterval); el._timerInterval = null; } } catch(e){}
+
+    // create or find debug skip button
+    let debugSkipBtn = el.querySelector('.main-timer-skip');
+    if (isDebugMode() && !debugSkipBtn) {
+      debugSkipBtn = document.createElement('button');
+      debugSkipBtn.className = 'main-timer-skip';
+      debugSkipBtn.textContent = '休憩を残り3秒にする';
+      debugSkipBtn.style.display = 'block';
+      debugSkipBtn.style.margin = '8px auto 0';
+      debugSkipBtn.style.padding = '6px 10px';
+      debugSkipBtn.style.fontSize = '14px';
+      debugSkipBtn.addEventListener('click', () => { remain = 3; });
+      el.appendChild(debugSkipBtn);
+    }
+
+    const txtEl = el.querySelector('.main-timer-text');
+    const tick = () => {
+      const m = Math.floor(remain/60); const s = remain%60;
+      if (txtEl) txtEl.textContent = `休憩: ${m}分 ${s}秒`;
+      if (remain <= 0) { try { if (el._timerInterval) { clearInterval(el._timerInterval); el._timerInterval = null; } } catch(e){}; try { el.remove(); } catch(e){}; return; }
+      remain -= 1;
+    };
+    // run immediately and then every second
+    tick();
+    el._timerInterval = setInterval(tick, 1000);
+  }
+
+  // === Video preloading and Wake Lock helpers ===
+  // map of preloaded video elements by id
+  window.__preloadedMovies = window.__preloadedMovies || {};
+  let __wakeLock = null;
+
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator && !__wakeLock) {
+        __wakeLock = await navigator.wakeLock.request('screen');
+        __wakeLock.addEventListener('release', () => { console.log('[Main] WakeLock released'); __wakeLock = null; });
+        console.log('[Main] WakeLock acquired');
+      }
+    } catch (e) {
+      console.warn('[Main] failed to acquire WakeLock', e);
+      __wakeLock = null;
+    }
+  }
+
+  async function releaseWakeLock() {
+    try {
+      if (__wakeLock) {
+        await __wakeLock.release();
+        __wakeLock = null;
+      }
+    } catch (e) {
+      console.warn('[Main] failed to release WakeLock', e);
+      __wakeLock = null;
+    }
+  }
+
+  // Preload an array of movie ids (without extension)
+  async function preloadMovies(movieIds = []) {
+    const promises = [];
+    movieIds.forEach(id => {
+      try {
+        if (window.__preloadedMovies[id]) return; // already
+        const v = document.createElement('video');
+        v.preload = 'auto';
+        v.playsInline = true;
+        v.muted = true; // mute during preload to avoid autoplay restrictions
+        v.src = `assets/mp4/${id}.mp4`;
+        v.style.display = 'none';
+        document.body.appendChild(v);
+        window.__preloadedMovies[id] = v;
+        // attempt to load; resolve when metadata loaded
+        const p = new Promise((res) => {
+          const onLoaded = () => { try { v.removeEventListener('loadedmetadata', onLoaded); } catch(e){}; res(); };
+          v.addEventListener('loadedmetadata', onLoaded);
+          // fallback timeout to avoid hanging
+          setTimeout(() => { try { v.removeEventListener('loadedmetadata', onLoaded); } catch(e){}; res(); }, 8000);
+        });
+        promises.push(p);
+        // call load to start network fetch
+        try { v.load(); } catch(e) {}
+      } catch (e) { console.warn('[Main] preloadMovies failed for', id, e); }
+    });
+    try { await Promise.all(promises); } catch(e){}
+    console.log('[Main] preloadMovies finished', Object.keys(window.__preloadedMovies));
+  }
+
+  // debug mode detection and toggle
+  function isDebugMode() {
+    try {
+      if (window.__DEBUG === true) return true;
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('debug') === '1') return true;
+      if (localStorage.getItem('COI_DEBUG') === '1') return true;
+    } catch(e){}
+    return false;
+  }
+
+  function toggleDebugMode(on) {
+    const val = (typeof on === 'boolean') ? on : !isDebugMode();
+    try { localStorage.setItem('COI_DEBUG', val ? '1' : '0'); } catch(e){}
+    try { window.__DEBUG = val; } catch(e){}
+    showMessage(`Debug mode: ${val ? 'ON' : 'OFF'}`, 2);
+    // if a modal movie is open, update its controls
+    const vid = document.querySelector('#movieModal video');
+    if (vid) {
+      vid.controls = val;
+    }
+    return val;
+  }
+
+  // keyboard shortcut to toggle debug mode: Shift+D
+  window.addEventListener('keydown', (ev) => {
+    if (ev.shiftKey && (ev.key === 'D' || ev.key === 'd')) {
+      toggleDebugMode();
+    }
+  });
 
   // ===== 画像描画ヘルパー（キャンバスに画像をフィット描画、切替対応） =====
   const __canvasControllers = {};
@@ -211,6 +411,9 @@ document.addEventListener("DOMContentLoaded", () => {
   hideImages();
   // btnToggle.style.display = 'none';
 
+  // show name entry modal on load
+  try { createNameModal(); } catch(e) { console.warn('failed to create name modal', e); }
+
   // ===== Start / Stop =====
   const handleStart = async () => {
     if (isRunning) return;
@@ -222,6 +425,12 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       console.log("[Main] Start → MediaPipe初期化");
       await mediapipeInitAndStart();
+
+      // preload movies to reduce buffering during experiment
+      try { preloadMovies(['movie1-1','movie1-2','movie2-1','movie2-2']); } catch(e) { console.warn('[Main] preloadMovies failed', e); }
+
+      // try to acquire wake lock to prevent screen dimming
+      try { await requestWakeLock(); } catch(e) { /* ignore */ }
 
       console.log("[Main] キャリブレーション開始");
       calib = await runCalibration();
@@ -238,49 +447,11 @@ document.addEventListener("DOMContentLoaded", () => {
       // === 視線割合の集計を開始（キャリブ完了後〜Stopまで） ===
       setupGazeAggregation();
 
-      console.log("[Main] キャリブレーション完了 → エージェント表示");
-      showImages();
+  console.log("[Main] キャリブレーション完了 → エージェント表示");
+  showImages();
 
-        // Run 10 sets × 3s (total 30s). rotate paired images each set.
-        // If user presses Stop early, this sequence will be cancelled.
-        const TOTAL_SETS = 10;
-        const SET_MS = 3000; // 3 seconds per set
-        let currentSet = 0;
-        let sequenceCancelled = false;
-
-        // helper to set images for set index (1-based)
-        function setPairForIndex(i) {
-          const leftSrc = `assets/img/joy/joy (${i}).png`;
-          const rightSrc = `assets/img/sad/sad (${i}).png`;
-          if (leftImg) leftImg.setSrc(leftSrc);
-          if (rightImg) rightImg.setSrc(rightSrc);
-        }
-
-  // wait a browser frame so canvases are laid out after showImages(), then set first pair
-  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-  setPairForIndex(1);
-  // force refresh in case the image was set while canvas sizing was not yet stable
-  try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch(e){}
-  try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch(e){}
-
-        // schedule rotation across sets
-        if (autoStopTimer) clearTimeout(autoStopTimer);
-        autoStopTimer = setTimeout(function runNextSet() {
-          currentSet += 1;
-          if (sequenceCancelled || currentSet >= TOTAL_SETS) {
-            // finished all sets (or cancelled by stop) -> call handleStop after a tiny delay to allow last-frame processing
-            console.log('[Main] 全セット完了または中断: 終了処理へ移行');
-            // allow UI to update then stop
-            setTimeout(() => { handleStop(); }, 120);
-            return;
-          }
-          const nextIndex = currentSet + 1; // next set is 1-based
-          setPairForIndex(Math.min(nextIndex, TOTAL_SETS));
-          autoStopTimer = setTimeout(runNextSet, SET_MS);
-        }, SET_MS);
-
-        // expose a flag that other handlers (handleStop) can use to cancel the sequence
-        window.__sequenceCancel = () => { sequenceCancelled = true; if (autoStopTimer) { clearTimeout(autoStopTimer); autoStopTimer = null; } };
+      // start the experiment orchestration after calibration
+      await runExperimentSequence();
 
     } catch (e) {
       console.error("[Main] Startフロー失敗:", e);
@@ -327,6 +498,9 @@ document.addEventListener("DOMContentLoaded", () => {
     try { await sendEyeLandmarkData(); } catch {}
     try { await stopMediaPipeAll(); } catch {}
 
+  // release wake lock if held
+  try { await releaseWakeLock(); } catch(e) { console.warn('[Main] releaseWakeLock failed', e); }
+
     hideImages();
 
   
@@ -348,6 +522,198 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   // ===== ボタン配線 =====
+  // --- experiment helpers inserted here ---
+  function setPairForIndex(i) {
+    const leftSrc = `assets/img/joy/joy (${i}).png`;
+    const rightSrc = `assets/img/sad/sad (${i}).png`;
+    if (leftImg) leftImg.setSrc(leftSrc);
+    if (rightImg) rightImg.setSrc(rightSrc);
+  }
+
+  async function showImageRange(startIdx, endIdx, setMs = 3000) {
+    const total = endIdx - startIdx + 1;
+    for (let k = 0; k < total; k++) {
+      const idx = startIdx + k;
+      setPairForIndex(idx);
+      await new Promise(r => requestAnimationFrame(r));
+      try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) {}
+      try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) {}
+      await new Promise(r => setTimeout(r, setMs));
+    }
+  }
+
+  async function savePhaseData(phaseLabel) {
+    try {
+      // finalize aggregation summaries for this block
+      try { window.__lastGazeResult = teardownGazeAggregation(); } catch (e) {}
+      try { window.__lastOpenSummary = analyzer.summarize(); } catch (e) {}
+      await sendEyeLandmarkData({ name: participantNameRaw || null, nameSafe: participantNameSafe || null, phase: phaseLabel });
+    } catch (e) { console.warn('[Main] failed to save phase data', e); }
+  }
+
+  async function playMovie(movieId, durationSec = 300) {
+    return new Promise(async (resolve) => {
+      const modalId = 'movieModal';
+      // remove existing modal if any
+      const existing = document.getElementById(modalId);
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      const modal = document.createElement('div'); modal.id = modalId;
+      Object.assign(modal.style, { position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20000 });
+  const box = document.createElement('div'); Object.assign(box.style, { width: '90%', maxWidth: '1400px', background: '#000', padding: '6px', borderRadius: '6px', textAlign: 'center' });
+
+  // prefer a preloaded video element if available
+  let video = window.__preloadedMovies && window.__preloadedMovies[movieId];
+      let ownVideo = false;
+  if (video && video.tagName === 'VIDEO') {
+        // reuse preloaded element but clone to avoid muting/preload flags
+        try {
+          const clone = document.createElement('video');
+          clone.controls = isDebugMode(); clone.style.width = '100%'; clone.style.height = 'auto'; clone.playsInline = true; clone.preload = 'auto';
+          // use same src
+          clone.src = video.currentSrc || video.src || `assets/mp4/${movieId}.mp4`;
+          video = clone;
+          ownVideo = true;
+        } catch(e) { video = null; }
+      }
+      if (!video) {
+        video = document.createElement('video');
+        video.controls = isDebugMode(); video.style.width = '100%'; video.style.height = 'auto'; video.playsInline = true; video.preload = 'auto';
+        video.src = `assets/mp4/${movieId}.mp4`;
+        ownVideo = true;
+      }
+
+      box.appendChild(video);
+      // const btn = document.createElement('button'); btn.textContent = '再生（クリック）'; btn.style.marginTop = '8px'; btn.style.padding = '8px 12px'; btn.style.fontSize = '16px';
+      // box.appendChild(btn);
+      modal.appendChild(box); document.body.appendChild(modal);
+
+      // try autoplay; if blocked user can click button to start
+      try { const p = video.play(); if (p && p.catch) p.catch(()=>{}); } catch(e) { /* ignore */ }
+      // btn.addEventListener('click', async () => { try { await video.play(); } catch(e){} });
+
+      // ensure we resolve only when playback ends (not on timeout)
+      const timeoutId = setTimeout(() => {
+        // fallback: if video didn't end within durationSec, we'll still clean up but do NOT auto-advance; prefer ended event
+        console.warn('[Main] playMovie fallback timeout reached for', movieId);
+      }, durationSec*1000 + 1500);
+
+      function onEnded() { clearTimeout(timeoutId); cleanup(); resolve(); }
+      function cleanup() { try { video.removeEventListener('ended', onEnded); } catch(e){}; if (modal && modal.parentNode) modal.parentNode.removeChild(modal); try { releaseWakeLock(); } catch(e){}; if (ownVideo) try { video.src = ''; } catch(e){} }
+      video.addEventListener('ended', onEnded);
+    });
+  }
+
+  async function runExperimentSequence() {
+    // Phase 1
+    showMessage('次に10ペアの画像が表示されます。', 5);
+    await new Promise(r => setTimeout(r, 5000));
+  // ensure collector and normalized series start aligned
+  window.__normalizedOpenSeries = [];
+  try { resetCollectedData(); } catch(e){}
+  // resume processing and start collecting only for image display
+  try { resumeProcessing(); startCollecting(); } catch(e){}
+  setupGazeAggregation();
+  await showImageRange(1, 10, 3000);
+  // after image block, stop collecting and pause processing to save and be lightweight
+  try { stopCollecting(); pauseProcessing(); } catch(e){}
+  await savePhaseData('1-1');
+  // hide images when block finishes and show next instruction
+  try { hideImages(); } catch(e){}
+  showMessage('続いて動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+  await new Promise(r => setTimeout(r, 5000));
+  await playMovie('movie1-1', 300);
+
+    // images 1-2
+  showMessage('次に10ペアの画像が表示されます。', 3);
+  await new Promise(r => setTimeout(r, 3000));
+  window.__normalizedOpenSeries = [];
+  try { resetCollectedData(); } catch(e){}
+  try { resumeProcessing(); startCollecting(); } catch(e){}
+  // ensure images are visible for the next block
+  try { showImages(); } catch(e){}
+  setupGazeAggregation();
+  await showImageRange(11, 20, 3000);
+  try { stopCollecting(); pauseProcessing(); } catch(e){}
+  await savePhaseData('1-2');
+    // 5 minute rest
+    try { hideImages(); } catch(e){}
+    showMessage('5分間の休憩を取ります。', 5);
+    await new Promise(r => setTimeout(r, 5000));
+    showTimer(5);
+    await new Promise(r => setTimeout(r, 5*60*1000));
+  showMessage('休憩終了です。次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+  await new Promise(r => setTimeout(r, 5000));
+  await playMovie('movie1-2', 300);
+
+    // images 1-3
+  showMessage('次に10ペアの画像が表示されます。', 3);
+  await new Promise(r => setTimeout(r, 3000));
+  window.__normalizedOpenSeries = [];
+  try { resetCollectedData(); } catch(e){}
+  try { resumeProcessing(); startCollecting(); } catch(e){}
+  try { showImages(); } catch(e){}
+  setupGazeAggregation();
+  await showImageRange(21, 30, 3000);
+  try { stopCollecting(); pauseProcessing(); } catch(e){}
+  await savePhaseData('1-3');
+
+    // End of Phase 1
+    try { hideImages(); } catch(e){}
+    showMessage('フェーズ1終了です', 5);
+    await new Promise(r => setTimeout(r, 5000));
+    // show Next button
+    const nextBtn = document.createElement('button'); nextBtn.textContent = '次へ'; nextBtn.style.position = 'fixed'; nextBtn.style.left = '50%'; nextBtn.style.bottom = '10%'; nextBtn.style.transform = 'translateX(-50%)'; nextBtn.style.zIndex = 16000; document.body.appendChild(nextBtn);
+    await new Promise(resolve => { nextBtn.addEventListener('click', () => { nextBtn.remove(); resolve(); }, { once: true }); });
+
+    // Phase 2 (mirror of Phase 1 but with movie2 IDs)
+  showMessage('次に10ペアの画像が表示されます。', 5);
+  await new Promise(r => setTimeout(r, 5000));
+  window.__normalizedOpenSeries = [];
+  try { resetCollectedData(); } catch(e){}
+  try { resumeProcessing(); startCollecting(); } catch(e){}
+  setupGazeAggregation();
+    await showImageRange(31, 40, 3000);
+  try { stopCollecting(); pauseProcessing(); } catch(e){}
+  await savePhaseData('2-1');
+  try { hideImages(); } catch(e){}
+  showMessage('続いて動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+  await new Promise(r => setTimeout(r, 5000));
+  await playMovie('movie2-1', 300);
+
+  showMessage('次に10ペアの画像が表示されます。', 3);
+  await new Promise(r => setTimeout(r, 3000));
+  window.__normalizedOpenSeries = [];
+  try { resetCollectedData(); } catch(e){}
+  try { resumeProcessing(); startCollecting(); } catch(e){}
+  try { showImages(); } catch(e){}
+  setupGazeAggregation();
+  await showImageRange(41, 50, 3000);
+  try { stopCollecting(); pauseProcessing(); } catch(e){}
+  await savePhaseData('2-2');
+
+  try { hideImages(); } catch(e){}
+  showMessage('5分間の休憩を取ります。', 5);
+    await new Promise(r => setTimeout(r, 5000));
+    showTimer(5);
+    await new Promise(r => setTimeout(r, 5*60*1000));
+  showMessage('休憩終了です。次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+  await new Promise(r => setTimeout(r, 5000));
+  await playMovie('movie2-2', 300);
+
+  showMessage('次に10ペアの画像が表示されます。', 3);
+  await new Promise(r => setTimeout(r, 3000));
+  window.__normalizedOpenSeries = [];
+  try { resetCollectedData(); } catch(e){}
+  try { resumeProcessing(); startCollecting(); } catch(e){}
+  try { showImages(); } catch(e){}
+  setupGazeAggregation();
+  await showImageRange(51, 60, 3000);
+  try { stopCollecting(); pauseProcessing(); } catch(e){}
+  await savePhaseData('2-3');
+
+    try { hideImages(); } catch(e){}
+    showMessage('実験が終了しました。ご協力ありがとうございました。', 5);
+  }
   if (btnToggle) {
     btnToggle.addEventListener("click", async () => {
       if (!isRunning) await handleStart();
@@ -489,12 +855,14 @@ function renderFinalResults(panel, gazeRes) {
     onGazeIn = (ev) => {
       const ux = ev?.detail?.ux;
       if (typeof ux !== "number") return;
+      if (!gazeCounts) { console.warn('[Main] onGazeIn called but gazeCounts is null'); return; }
       if (ux < 0.5) gazeCounts.left += 1;
       else          gazeCounts.right += 1;
       gazeCounts.totalIn += 1;
       // console.debug("[Gaze] in ux=", ux.toFixed(3));
     };
     onGazeOOB = () => {
+      if (!gazeCounts) { console.warn('[Main] onGazeOOB called but gazeCounts is null'); return; }
       gazeCounts.oob += 1;
       // console.debug("[Gaze] out-of-bounds");
     };

@@ -63,6 +63,22 @@ export function stopCollecting() {
   collecting = false;
 }
 
+export function startCollecting() {
+  collecting = true;
+}
+
+// lightweight pause/resume of processing (keeps camera stream alive but stops inference loop)
+export function pauseProcessing() {
+  running = false;
+}
+
+export function resumeProcessing() {
+  if (running) return;
+  running = true;
+  // restart loop
+  try { loop(); } catch(e) {}
+}
+
 /** ★完全停止：測定・イベント・プレビューすべて停止 */
 export async function stopMediaPipeAll() {
   // 収集停止
@@ -94,12 +110,16 @@ export async function stopMediaPipeAll() {
 }
 
 /** サーバ送信（必要に応じて） */
-export async function sendEyeLandmarkData() {
+export async function sendEyeLandmarkData(options = {}) {
   // Save collectedData to a local JSON file (trigger download)
   try {
     const session_id = getOrCreateSessionId();
     const ts = Date.now();
-    const baseName = `eye_capture_${session_id}_${ts}`;
+    const name = options.name ? String(options.name) : null; // display name (can be Japanese)
+    const nameSafe = options.nameSafe ? String(options.nameSafe) : null; // file-safe name
+    const phase = options.phase ? String(options.phase) : null;
+    const basePrefix = nameSafe ? nameSafe : (name ? encodeURIComponent(name) : `eye_capture_${session_id}`);
+    const baseName = phase ? `${basePrefix}_${phase}_${ts}` : `${basePrefix}_${ts}`;
   // NOTE: meta is included in finalResults.json, so do not emit a separate meta JSON to avoid duplication
     // eye frames
     const eyeBlob = new Blob([JSON.stringify(collectedEyeFrames, null, 2)], { type: 'application/json' });
@@ -123,6 +143,9 @@ export async function sendEyeLandmarkData() {
       const gazeSummary = window.__lastGazeResult || null;
       // compose enriched meta: include canvas bounding rects and calibration/coef information if available
       const meta = Object.assign({}, collectedMeta || {});
+  // add participant name/phase if provided
+  if (name) meta.participant = name;
+  if (phase) meta.phase = phase;
       try {
         const c1 = document.getElementById('myCanvas1');
         const c2 = document.getElementById('myCanvas2');
