@@ -10,6 +10,7 @@ import {
   mediapipeInitAndStart,
   sendEyeLandmarkData,
   stopMediaPipeAll,
+  resetCollectedData,
 } from "./mediapipe.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
 import { DataAnalyzer } from "./dataAnalyzer.js";
@@ -231,6 +232,8 @@ document.addEventListener("DOMContentLoaded", () => {
   analyzer.reset();
   // reset normalized series
   window.__normalizedOpenSeries = [];
+  // align mediapipe storage start with normalized open series start
+  try { resetCollectedData(); } catch(e) { console.warn('[Main] failed to reset collected data', e); }
 
       // === 視線割合の集計を開始（キャリブ完了後〜Stopまで） ===
       setupGazeAggregation();

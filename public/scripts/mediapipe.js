@@ -1,6 +1,6 @@
 // public/scripts/mediapipe.js
 import { BACKEND_URL, EYE_LANDMARKS } from "./config.js";
-import { computeEyeOpenRatio } from "./calibration.js";
+import { computeEyeOpenRatio, correctEyeArrayForGaze, correctGazePoint } from "./calibration.js";
 import {
   FilesetResolver,
   FaceLandmarker
@@ -48,6 +48,14 @@ export async function mediapipeInitAndStart() {
 
   // ループ開始
   loop();
+}
+
+// allow main.js to align collection timing with normalizedOpenSeries start
+export function resetCollectedData() {
+  collectedMeta = { startedAt: performance.now() };
+  collectedEyeFrames = [];
+  collectedGazeFrames = [];
+  collectedData = collectedEyeFrames;
 }
 
 export function stopCollecting() {
@@ -132,7 +140,8 @@ export async function sendEyeLandmarkData() {
           meta.calibration = {
             openBaseline: lastCalib.openBaseline || null,
             closedBaseline: lastCalib.closedBaseline || null,
-            gazeCoeffs: lastCalib.gaze || null
+            gazeCoeffs: lastCalib.gaze || null,
+            ref: lastCalib.ref || null
           };
         } else {
           // fallback: try localStorage stored gaze coefficients
@@ -237,9 +246,29 @@ function loop() {
     // Save only eye landmarks (subset) for lightweight storage
     const eyeOnly = EYE_LANDMARKS.map(i => ({ idx: i, x: +(landmarks[i].x).toFixed(4), y: +(landmarks[i].y).toFixed(4), z: +(landmarks[i].z ?? 0).toFixed(4) }));
 
-  // persist per-frame into separate arrays
-  collectedEyeFrames.push({ ts: now, eye: eyeOnly });
-  collectedGazeFrames.push({ ts: now, gaze: lastGaze });
+    // compute corrected eye landmarks for storage (normalized into reference space)
+    let correctedEyeForStorage = null;
+    try {
+      correctedEyeForStorage = correctEyeArrayForGaze(eyeOnly) || eyeOnly;
+    } catch(e) { correctedEyeForStorage = eyeOnly; }
+
+    // persist per-frame into separate arrays using corrected coordinates
+    collectedEyeFrames.push({ ts: now, eye: correctedEyeForStorage });
+
+    // for gaze frames, try to correct lastGaze (if available) into the same reference space
+    let gazeToStore = null;
+    try {
+      if (lastGaze && lastGaze.px != null && lastGaze.py != null) {
+        // lastGaze px/py are canvas pixels relative to myCanvas3; correct using eye landmarks
+        const canvasEl = document.getElementById('myCanvas3');
+        const corrected = correctGazePoint(lastGaze.px, lastGaze.py, eyeOnly, canvasEl);
+        gazeToStore = { px: corrected.px, py: corrected.py, ux: corrected.px / (canvasEl ? canvasEl.width : 1), uy: corrected.py / (canvasEl ? canvasEl.height : 1) };
+      } else {
+        gazeToStore = lastGaze;
+      }
+    } catch(e) { gazeToStore = lastGaze; }
+
+    collectedGazeFrames.push({ ts: now, gaze: gazeToStore });
   // raw openRatio intentionally not stored; normalized series from main.js is saved separately
 
     // 記録 フラグにより追加処理可能
