@@ -121,8 +121,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
     // initialize left/right canvases with default emotion images (left-aligned / right-aligned)
-  const leftImg = createCanvasImageController('myCanvas1', 'assets/img/joy1.png', { alignment: 'left', margin: 12 });
-  const rightImg = createCanvasImageController('myCanvas2', 'assets/img/sad1.png', { alignment: 'right', margin: 12 });
+  const leftImg = createCanvasImageController('myCanvas1', 'assets/img/joy/joy (1).png', { alignment: 'left', margin: 12 });
+  const rightImg = createCanvasImageController('myCanvas2', 'assets/img/sad/sad (1).png', { alignment: 'right', margin: 12 });
   // global helper for runtime switching (for debugging/testing)
   window.setCanvasImage = (canvasId, src) => {
     const c = __canvasControllers[canvasId]; if (c) c.setSrc(src); else console.warn('no canvas controller', canvasId);
@@ -206,7 +206,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 初期状態：非表示
   // hideImages();
-  showImages();
+  // keep images hidden until calibration completes
+  hideImages();
   // btnToggle.style.display = 'none';
 
   // ===== Start / Stop =====
@@ -234,12 +235,46 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("[Main] キャリブレーション完了 → エージェント表示");
       showImages();
 
-      // 10秒後に自動停止
-      if (autoStopTimer) clearTimeout(autoStopTimer);
-      autoStopTimer = setTimeout(() => {
-        console.log("[Main] 10秒経過 → 自動停止実行");
-        handleStop();
-      }, 10000);
+        // Run 10 sets × 3s (total 30s). rotate paired images each set.
+        // If user presses Stop early, this sequence will be cancelled.
+        const TOTAL_SETS = 10;
+        const SET_MS = 3000; // 3 seconds per set
+        let currentSet = 0;
+        let sequenceCancelled = false;
+
+        // helper to set images for set index (1-based)
+        function setPairForIndex(i) {
+          const leftSrc = `assets/img/joy/joy (${i}).png`;
+          const rightSrc = `assets/img/sad/sad (${i}).png`;
+          if (leftImg) leftImg.setSrc(leftSrc);
+          if (rightImg) rightImg.setSrc(rightSrc);
+        }
+
+  // wait a browser frame so canvases are laid out after showImages(), then set first pair
+  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  setPairForIndex(1);
+  // force refresh in case the image was set while canvas sizing was not yet stable
+  try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch(e){}
+  try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch(e){}
+
+        // schedule rotation across sets
+        if (autoStopTimer) clearTimeout(autoStopTimer);
+        autoStopTimer = setTimeout(function runNextSet() {
+          currentSet += 1;
+          if (sequenceCancelled || currentSet >= TOTAL_SETS) {
+            // finished all sets (or cancelled by stop) -> call handleStop after a tiny delay to allow last-frame processing
+            console.log('[Main] 全セット完了または中断: 終了処理へ移行');
+            // allow UI to update then stop
+            setTimeout(() => { handleStop(); }, 120);
+            return;
+          }
+          const nextIndex = currentSet + 1; // next set is 1-based
+          setPairForIndex(Math.min(nextIndex, TOTAL_SETS));
+          autoStopTimer = setTimeout(runNextSet, SET_MS);
+        }, SET_MS);
+
+        // expose a flag that other handlers (handleStop) can use to cancel the sequence
+        window.__sequenceCancel = () => { sequenceCancelled = true; if (autoStopTimer) { clearTimeout(autoStopTimer); autoStopTimer = null; } };
 
     } catch (e) {
       console.error("[Main] Startフロー失敗:", e);
@@ -263,6 +298,9 @@ document.addEventListener("DOMContentLoaded", () => {
       clearTimeout(autoStopTimer);
       autoStopTimer = null;
     }
+
+    // cancel running sequence if present
+    try { if (window.__sequenceCancel) window.__sequenceCancel(); } catch(e) {}
 
     // compute final gaze aggregation now so we can include it in saved files
     const gazeResult = (typeof teardownGazeAggregation === "function")
