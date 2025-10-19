@@ -45,7 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let participantNameRaw = null; // human-readable, may contain Japanese
   let participantNameSafe = null; // file-safe encoded name
 
-  toggleDebugMode(true);
+  //toggleDebugMode(true);
 
   // create a simple modal for participant name input
   function createNameModal() {
