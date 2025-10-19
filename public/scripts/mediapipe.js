@@ -113,7 +113,34 @@ export async function sendEyeLandmarkData() {
     try {
       const openSummary = window.__lastOpenSummary || null;
       const gazeSummary = window.__lastGazeResult || null;
-      const finalResults = { session_id, ts, meta: collectedMeta, openSummary, gazeSummary };
+      // compose enriched meta: include canvas bounding rects and calibration/coef information if available
+      const meta = Object.assign({}, collectedMeta || {});
+      try {
+        const c1 = document.getElementById('myCanvas1');
+        const c2 = document.getElementById('myCanvas2');
+        const c3 = document.getElementById('myCanvas3');
+        meta.canvasRects = {
+          myCanvas1: c1 ? c1.getBoundingClientRect() : null,
+          myCanvas2: c2 ? c2.getBoundingClientRect() : null,
+          myCanvas3: c3 ? c3.getBoundingClientRect() : null
+        };
+      } catch(e){}
+      try {
+        // calibration baselines and gaze coeffs are exposed by main.js to window.__lastCalibration
+        const lastCalib = window.__lastCalibration || null;
+        if (lastCalib) {
+          meta.calibration = {
+            openBaseline: lastCalib.openBaseline || null,
+            closedBaseline: lastCalib.closedBaseline || null,
+            gazeCoeffs: lastCalib.gaze || null
+          };
+        } else {
+          // fallback: try localStorage stored gaze coefficients
+          try { const stored = JSON.parse(localStorage.getItem('gaze_calib_v1')); if (stored) meta.calibration = { gazeCoeffs: stored }; } catch(e){}
+        }
+      } catch(e){}
+
+      const finalResults = { session_id, ts, meta, openSummary, gazeSummary };
       const finalBlob = new Blob([JSON.stringify(finalResults, null, 2)], { type: 'application/json' });
       downloadBlob(finalBlob, `${baseName}_finalResults.json`);
     } catch(e){}

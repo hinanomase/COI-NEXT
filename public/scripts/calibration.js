@@ -337,8 +337,16 @@ export function startGazeVisualization(coeffs) {
     const f = FEAT(feat);
     const dot = (w) => f.reduce((s,v,i)=>s + v * (w[i]||0), 0);
     let px = dot(_gazeW.W_x), py = dot(_gazeW.W_y);
-      // expose latest gaze point for capture (page/canvas pixels and normalized ux/uy)
-      try { window.__lastGazePoint = { px, py, ux: px / canvas.width, uy: py / canvas.height }; } catch(e) { window.__lastGazePoint = null; }
+    // expose latest gaze point for capture (page/canvas pixels and normalized ux/uy)
+    try { 
+      console.log("Gaze point:", px, py);
+      window.__lastGazePoint = {
+        px, py, ux: px / canvas.width, uy: py / canvas.height
+      };
+    } catch(e) {
+      console.warn("Failed to set __lastGazePoint:", e);
+      window.__lastGazePoint = null;
+    }
 
     // determine whether gaze (px,py) on myCanvas3 maps into myCanvas1 or myCanvas2
     const canvasRect = canvas.getBoundingClientRect();

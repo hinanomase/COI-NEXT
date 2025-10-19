@@ -225,6 +225,9 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("[Main] キャリブレーション開始");
       calib = await runCalibration();
 
+  // expose calibration info globally so save routine can include baselines and gaze coeffs
+  try { window.__lastCalibration = calib; } catch (e) { window.__lastCalibration = null; }
+
   analyzer.reset();
   // reset normalized series
   window.__normalizedOpenSeries = [];
