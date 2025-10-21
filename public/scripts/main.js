@@ -100,6 +100,22 @@ document.addEventListener("DOMContentLoaded", () => {
       el.style.left = '50%'; el.style.top = '50%'; el.style.transform = 'translate(-50%, -50%)';
     }
     el.style.display = '';
+    // if a previous action requested that images be shown after the next message, do it now
+    if (typeof __deferShowImagesAfterNextMessage !== 'undefined' && __deferShowImagesAfterNextMessage) {
+      __deferShowImagesAfterNextMessage = false;
+      (async () => {
+        try {
+          // wait for a layout frame then a short delay to ensure wrappers are visible
+          await new Promise(r => requestAnimationFrame(r));
+          await new Promise(r => setTimeout(r, 60));
+          try { showImages(); } catch (e) { console.warn('[Main] deferred showImages failed', e); }
+          try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) { console.warn('[Main] deferred leftImg.refresh failed', e); }
+          try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) { console.warn('[Main] deferred rightImg.refresh failed', e); }
+        } catch (e) {
+          console.warn('[Main] error while performing deferred showImages', e);
+        }
+      })();
+    }
     if (secs > 0) setTimeout(() => { try { el.style.display = 'none'; } catch(e){} }, secs*1000);
   }
 
@@ -313,8 +329,23 @@ document.addEventListener("DOMContentLoaded", () => {
       img.src = s;
     }
 
+    function clear() {
+      try {
+        currentSrc = null;
+        img = new Image();
+        // ensure canvas backing store matches current layout then clear visually
+        ensureSize();
+        const dpr = window.devicePixelRatio || 1;
+        const cw = canvas.width / dpr;
+        const ch = canvas.height / dpr;
+        try { ctx.clearRect(0, 0, cw, ch); } catch(e) { /* ignore */ }
+      } catch (e) {
+        console.warn('[Main] clear canvas failed', canvasId, e);
+      }
+    }
+
     // expose
-    const ctrl = { setSrc, refresh: render, img };
+  const ctrl = { setSrc, refresh: render, clear, img };
     __canvasControllers[canvasId] = ctrl;
     // if a src was provided, set it after a short delay to allow layout
     if (src) setTimeout(() => setSrc(src), 250);
@@ -364,6 +395,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let calib = null;
   let emaOpen = null;
   let autoStopTimer = null; // ← 自動停止用タイマーID
+  // when true, the next call to showMessage() will unhide images and refresh canvases once
+  let __deferShowImagesAfterNextMessage = false;
 
   // Service Worker 登録（PWA） — DOMContentLoaded の中に置く
   // if ('serviceWorker' in navigator) {
@@ -393,6 +426,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ===== エージェントの表示/非表示 =====
   const hideImages = () => {
+    clearImages();
     const wrap1 = canvas1?.closest('.canvas-square');
     const wrap2 = canvas2?.closest('.canvas-square');
     if (wrap1) wrap1.style.display = 'none'; else if (canvas1) canvas1.style.display = 'none';
@@ -530,6 +564,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (rightImg) rightImg.setSrc(rightSrc);
   }
 
+  function clearImages() {
+    try { if (leftImg && typeof leftImg.clear === 'function') leftImg.clear(); else if (leftImg) leftImg.setSrc(null); } catch(e){}
+    try { if (rightImg && typeof rightImg.clear === 'function') rightImg.clear(); else if (rightImg) rightImg.setSrc(null); } catch(e){}
+  }
+
   async function showImageRange(startIdx, endIdx, setMs = 3000) {
     const total = endIdx - startIdx + 1;
     for (let k = 0; k < total; k++) {
@@ -606,7 +645,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function runExperimentSequence() {
     // Phase 1
     showMessage('次に10ペアの画像が表示されます。', 5);
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 6000));
   // ensure collector and normalized series start aligned
   window.__normalizedOpenSeries = [];
   try { resetCollectedData(); } catch(e){}
@@ -624,13 +663,13 @@ document.addEventListener("DOMContentLoaded", () => {
   await playMovie('movie1-1', 300);
 
     // images 1-2
+  try { showImages(); } catch(e){}
   showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 3000));
+  await new Promise(r => setTimeout(r, 4000));
   window.__normalizedOpenSeries = [];
   try { resetCollectedData(); } catch(e){}
   try { resumeProcessing(); startCollecting(); } catch(e){}
   // ensure images are visible for the next block
-  try { showImages(); } catch(e){}
   setupGazeAggregation();
   await showImageRange(11, 20, 3000);
   try { stopCollecting(); pauseProcessing(); } catch(e){}
@@ -641,17 +680,18 @@ document.addEventListener("DOMContentLoaded", () => {
     await new Promise(r => setTimeout(r, 5000));
     showTimer(5);
     await new Promise(r => setTimeout(r, 5*60*1000));
+    // await new Promise(r => setTimeout(r, 3*1000));
   showMessage('休憩終了です。次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
   await new Promise(r => setTimeout(r, 5000));
   await playMovie('movie1-2', 300);
 
     // images 1-3
+  try { showImages(); } catch(e){}
   showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 3000));
+  await new Promise(r => setTimeout(r, 4000));
   window.__normalizedOpenSeries = [];
   try { resetCollectedData(); } catch(e){}
   try { resumeProcessing(); startCollecting(); } catch(e){}
-  try { showImages(); } catch(e){}
   setupGazeAggregation();
   await showImageRange(21, 30, 3000);
   try { stopCollecting(); pauseProcessing(); } catch(e){}
@@ -661,18 +701,77 @@ document.addEventListener("DOMContentLoaded", () => {
     try { hideImages(); } catch(e){}
     showMessage('フェーズ1終了です', 5);
     await new Promise(r => setTimeout(r, 5000));
-    // show Next button
-    const nextBtn = document.createElement('button'); nextBtn.textContent = '次へ'; nextBtn.style.position = 'fixed'; nextBtn.style.left = '50%'; nextBtn.style.bottom = '10%'; nextBtn.style.transform = 'translateX(-50%)'; nextBtn.style.zIndex = 16000; document.body.appendChild(nextBtn);
-    await new Promise(resolve => { nextBtn.addEventListener('click', () => { nextBtn.remove(); resolve(); }, { once: true }); });
+    // show Next button (rich style) centered over #myCanvas3
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = '次へ';
+    Object.assign(nextBtn.style, {
+      position: 'fixed',
+      zIndex: 16000,
+      padding: '12px 22px',
+      fontSize: '18px',
+      fontWeight: '700',
+      color: '#fff',
+      background: 'linear-gradient(90deg,#4b8cff,#3366ff)',
+      border: 'none',
+      borderRadius: '12px',
+      boxShadow: '0 8px 24px rgba(51,102,255,0.22)',
+      cursor: 'pointer',
+      transform: 'translate(-50%, -50%)',
+      transition: 'transform .12s ease, box-shadow .12s ease',
+    });
+    nextBtn.setAttribute('aria-label', '次へ (フェーズ2へ進む)');
+    document.body.appendChild(nextBtn);
+
+    const canvas3 = document.getElementById('myCanvas3');
+    function positionNextBtn() {
+      try {
+        if (canvas3) {
+          const r = canvas3.getBoundingClientRect();
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          nextBtn.style.left = cx + 'px';
+          nextBtn.style.top = cy + 'px';
+        } else {
+          nextBtn.style.left = (window.innerWidth / 2) + 'px';
+          nextBtn.style.top = (window.innerHeight / 2) + 'px';
+        }
+      } catch (e) {
+        nextBtn.style.left = '50%'; nextBtn.style.top = '50%';
+      }
+    }
+    positionNextBtn();
+    window.addEventListener('resize', positionNextBtn);
+
+    // when Next is pressed, make sure images are shown and canvases refresh before continuing
+    await new Promise(resolve => {
+      nextBtn.addEventListener('click', async () => {
+        try {
+          // visual press effect
+          nextBtn.style.transform = 'translate(-50%, -50%) scale(0.98)';  
+        } catch (err) {
+          console.warn('[Main] error during Next click preparation', err);
+        }
+        try { window.removeEventListener('resize', positionNextBtn); } catch(e){}
+        try { nextBtn.remove(); } catch(e){}
+        resolve();
+      }, { once: true });
+    });
 
     // Phase 2 (mirror of Phase 1 but with movie2 IDs)
-  showMessage('次に10ペアの画像が表示されます。', 5);
-  await new Promise(r => setTimeout(r, 5000));
+  try { showImages(); } catch (e) { console.warn('[Main] showImages failed on Next click', e); }
+  // allow layout to settle
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => setTimeout(r, 60));
+  // refresh canvas controllers to recalc backing store
+  try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) { console.warn('[Main] leftImg.refresh failed', e); }
+  try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) { console.warn('[Main] rightImg.refresh failed', e); }
+  showMessage('次に10ペアの画像が表示されます。', 3);
+  await new Promise(r => setTimeout(r, 4000));
   window.__normalizedOpenSeries = [];
   try { resetCollectedData(); } catch(e){}
   try { resumeProcessing(); startCollecting(); } catch(e){}
   setupGazeAggregation();
-    await showImageRange(31, 40, 3000);
+  await showImageRange(31, 40, 3000);
   try { stopCollecting(); pauseProcessing(); } catch(e){}
   await savePhaseData('2-1');
   try { hideImages(); } catch(e){}
@@ -680,12 +779,12 @@ document.addEventListener("DOMContentLoaded", () => {
   await new Promise(r => setTimeout(r, 5000));
   await playMovie('movie2-1', 300);
 
+  try { showImages(); } catch(e){}
   showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 3000));
+  await new Promise(r => setTimeout(r, 4000));
   window.__normalizedOpenSeries = [];
   try { resetCollectedData(); } catch(e){}
   try { resumeProcessing(); startCollecting(); } catch(e){}
-  try { showImages(); } catch(e){}
   setupGazeAggregation();
   await showImageRange(41, 50, 3000);
   try { stopCollecting(); pauseProcessing(); } catch(e){}
@@ -696,16 +795,17 @@ document.addEventListener("DOMContentLoaded", () => {
     await new Promise(r => setTimeout(r, 5000));
     showTimer(5);
     await new Promise(r => setTimeout(r, 5*60*1000));
+    // await new Promise(r => setTimeout(r, 3*1000));
   showMessage('休憩終了です。次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
   await new Promise(r => setTimeout(r, 5000));
   await playMovie('movie2-2', 300);
-
+  
+  try { showImages(); } catch(e){}
   showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 3000));
+  await new Promise(r => setTimeout(r, 4000));
   window.__normalizedOpenSeries = [];
   try { resetCollectedData(); } catch(e){}
   try { resumeProcessing(); startCollecting(); } catch(e){}
-  try { showImages(); } catch(e){}
   setupGazeAggregation();
   await showImageRange(51, 60, 3000);
   try { stopCollecting(); pauseProcessing(); } catch(e){}

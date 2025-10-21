@@ -15,8 +15,8 @@ button { font: inherit; }
 #app {
   height: 100vh;
   display: grid;
-  --topH: 50vh;     /* 上段の固定高さ（必要に応じて変更可） */
-  --bottomH: 50vh;  /* 開いているときの下段高さ */
+  --topH: 60vh;     /* 上段の固定高さ（少し縦に広げる） */
+  --bottomH: 40vh;  /* 開いているときの下段高さ（上段を広げたので下段を調整） */
   grid-template-rows: 1fr var(--topH) 28px var(--bottomH) 1fr;
   transition: grid-template-rows .25s ease;
 }
@@ -36,7 +36,7 @@ button { font: inherit; }
   background: #0b0f19;
   display: flex;
   width: 100%;
-  height: 50vh;
+  height: var(--topH);
   align-items: center;
   justify-content: center;
   position: relative;
