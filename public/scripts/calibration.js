@@ -239,6 +239,36 @@ export function computeFeatureFromEye(eyeArray) {
 
 // Module-level: apply same position+scale correction to eye landmarks (returns normalized coords)
 export function correctEyeArrayForGaze(eyeArray) {
+  // delegate to the new transform helpers so calibration-vs-current deltas are computed in one place
+  try {
+    if (!eyeArray || !eyeArray.length) return null;
+    const t = computeCalibrationTransform(eyeArray);
+    if (!t) return null;
+    return applyCalibrationToLandmarks(eyeArray, t);
+  } catch (e) { return null; }
+}
+
+// exported: correct a gaze point (px/py in canvas pixels) using current REF and observed eyeArray
+export function correctGazePoint(px, py, eyeArray, canvasEl) {
+  try {
+    if (!eyeArray || !eyeArray.length || !canvasEl) return { px, py };
+    // work in normalized coordinates and delegate to helper
+    const ux = px / canvasEl.width;
+    const uy = py / canvasEl.height;
+    const t = computeCalibrationTransform(eyeArray);
+    if (!t) return { px, py };
+    const norm = applyCalibrationToPoint(ux, uy, t);
+    return { px: norm.px * canvasEl.width, py: norm.py * canvasEl.height };
+  } catch (e) { return { px, py }; }
+}
+
+/* ===========================
+   Calibration transform helpers
+   - computeCalibrationTransform: from observed eye landmarks compute scale & translation
+   - applyCalibrationToPoint / applyCalibrationToLandmarks: apply transform in normalized coords
+   These centralize the translation+scale delta between the current frame and the calibration reference.
+   =========================== */
+function computeCalibrationTransform(eyeArray) {
   try {
     if (!eyeArray || !eyeArray.length) return null;
     const L_OUT = 33, R_OUT = 263;
@@ -248,42 +278,32 @@ export function correctEyeArrayForGaze(eyeArray) {
     const eyeCx = ((left.x || 0) + (right.x || 0)) / 2;
     const eyeCy = ((left.y || 0) + (right.y || 0)) / 2;
     const iod = Math.hypot((right.x || 0) - (left.x || 0), (right.y || 0) - (left.y || 0)) || 1e-6;
-    // prefer calibrated reference values when available
     const def = { REF_EYE_CX: 0.5034, REF_EYE_CY: 0.6058, REF_IOD: 0.45 };
     const ref = (window && window.__lastCalibration && window.__lastCalibration.ref) ? window.__lastCalibration.ref : def;
     const REF_EYE_CX = ref.REF_EYE_CX ?? def.REF_EYE_CX;
     const REF_EYE_CY = ref.REF_EYE_CY ?? def.REF_EYE_CY;
     const REF_IOD = ref.REF_IOD ?? def.REF_IOD;
+    // scale maps observed size to reference size
     const scale = REF_IOD / iod;
-    return eyeArray.map(p => ({ idx: p.idx, x: ((p.x || 0) - eyeCx) * scale + REF_EYE_CX, y: ((p.y || 0) - eyeCy) * scale + REF_EYE_CY, z: p.z }));
+    // tx,ty such that: nx = ux*scale + tx  where ux is observed normalized coord
+    const tx = -eyeCx * scale + REF_EYE_CX;
+    const ty = -eyeCy * scale + REF_EYE_CY;
+    return { scale, tx, ty };
   } catch (e) { return null; }
 }
 
-// exported: correct a gaze point (px/py in canvas pixels) using current REF and observed eyeArray
-export function correctGazePoint(px, py, eyeArray, canvasEl) {
-  try {
-    if (!eyeArray || !eyeArray.length || !canvasEl) return { px, py };
-    const L_OUT = 33, R_OUT = 263;
-    const m = new Map(eyeArray.map(p => [p.idx, p]));
-    const left = m.get(L_OUT) || eyeArray[0];
-    const right = m.get(R_OUT) || eyeArray[eyeArray.length-1];
-    const eyeCx = ((left.x || 0) + (right.x || 0)) / 2;
-    const eyeCy = ((left.y || 0) + (right.y || 0)) / 2;
-    const iod = Math.hypot((right.x || 0) - (left.x || 0), (right.y || 0) - (left.y || 0)) || 1e-6;
-    const def = { REF_EYE_CX: 0.5034, REF_EYE_CY: 0.6058, REF_IOD: 0.45 };
-    const ref = (window && window.__lastCalibration && window.__lastCalibration.ref) ? window.__lastCalibration.ref : def;
-    const REF_EYE_CX = ref.REF_EYE_CX ?? def.REF_EYE_CX;
-    const REF_EYE_CY = ref.REF_EYE_CY ?? def.REF_EYE_CY;
-    const REF_IOD = ref.REF_IOD ?? def.REF_IOD;
-    const ux = px / canvasEl.width;
-    const uy = py / canvasEl.height;
-    const scale = REF_IOD / iod;
-    let nx = (ux - eyeCx) * scale + REF_EYE_CX;
-    let ny = (uy - eyeCy) * scale + REF_EYE_CY;
-    nx = Math.max(0, Math.min(1, nx));
-    ny = Math.max(0, Math.min(1, ny));
-    return { px: nx * canvasEl.width, py: ny * canvasEl.height };
-  } catch (e) { return { px, py }; }
+function applyCalibrationToPoint(ux, uy, transform) {
+  if (!transform) return { px: ux, py: uy };
+  let nx = ux * transform.scale + transform.tx;
+  let ny = uy * transform.scale + transform.ty;
+  nx = Math.max(0, Math.min(1, nx));
+  ny = Math.max(0, Math.min(1, ny));
+  return { px: nx, py: ny };
+}
+
+function applyCalibrationToLandmarks(eyeArray, transform) {
+  if (!transform) return null;
+  return eyeArray.map(p => ({ idx: p.idx, x: ( (p.x || 0) * transform.scale + transform.tx ), y: ( (p.y || 0) * transform.scale + transform.ty ), z: p.z }));
 }
 
 // サンプル収集：一定時間 (ms) に来た mp:eye_frame を特徴量化して返す
@@ -394,75 +414,25 @@ export function startGazeVisualization(coeffs) {
   if (!canvas) return;
   _gazeOverlay = createAgentOverlay(canvas);
 
-  // --- position & scale correction for gaze points (no rotation) ---
-  // Uses eye landmarks (normalized 0..1) to compute observed eye-center and inter-ocular distance,
-  // then scales/translates the raw gaze ux/uy to compensate for face distance/translation.
+  // reuse module helpers to compute transform and map points/landmarks
   function correctGazePosition(px, py, eyeArray, canvasEl) {
     try {
       if (!eyeArray || !eyeArray.length || !canvasEl) return { px, py };
-      // landmark indices for outer eye corners
-      const L_OUT = 33, R_OUT = 263;
-      const m = new Map(eyeArray.map(p => [p.idx, p]));
-      const left = m.get(L_OUT) || eyeArray[0];
-      const right = m.get(R_OUT) || eyeArray[eyeArray.length-1];
-
-      // observed eye center (normalized space)
-      const eyeCx = ((left.x || 0) + (right.x || 0)) / 2;
-      const eyeCy = ((left.y || 0) + (right.y || 0)) / 2;
-
-      // observed inter-ocular distance (normalized)
-      const iod = Math.hypot((right.x || 0) - (left.x || 0), (right.y || 0) - (left.y || 0)) || 1e-6;
-
-  // reference values: prefer values from last calibration if available
-  const def = { REF_EYE_CX: 0.5034, REF_EYE_CY: 0.6058, REF_IOD: 0.45 };
-  const ref = (window && window.__lastCalibration && window.__lastCalibration.ref) ? window.__lastCalibration.ref : def;
-  const REF_EYE_CX = ref.REF_EYE_CX ?? def.REF_EYE_CX;
-  const REF_EYE_CY = ref.REF_EYE_CY ?? def.REF_EYE_CY;
-  const REF_IOD = ref.REF_IOD ?? def.REF_IOD;
-
-      // convert px/py to normalized ux/uy
       const ux = px / canvasEl.width;
       const uy = py / canvasEl.height;
-
-      // scale factor to map observed size to reference
-      const scale = REF_IOD / iod;
-
-      // translate ux/uy to eye-centered, scale, then translate to reference-centered
-      let nx = (ux - eyeCx) * scale + REF_EYE_CX;
-      let ny = (uy - eyeCy) * scale + REF_EYE_CY;
-
-      // clamp to [0,1]
-      nx = Math.max(0, Math.min(1, nx));
-      ny = Math.max(0, Math.min(1, ny));
-
-      return { px: nx * canvasEl.width, py: ny * canvasEl.height };
-    } catch (e) {
-      return { px, py };
-    }
+      const t = computeCalibrationTransform(eyeArray);
+      if (!t) return { px, py };
+      const n = applyCalibrationToPoint(ux, uy, t);
+      return { px: n.px * canvasEl.width, py: n.py * canvasEl.height };
+    } catch (e) { return { px, py }; }
   }
 
-  // map eye landmarks through the same translation+scale correction (returns normalized [0..1] coords)
   function mapEyeLandmarksCorrected(eyeArray) {
     try {
       if (!eyeArray || !eyeArray.length) return null;
-      const L_OUT = 33, R_OUT = 263;
-      const m = new Map(eyeArray.map(p => [p.idx, p]));
-      const left = m.get(L_OUT) || eyeArray[0];
-      const right = m.get(R_OUT) || eyeArray[eyeArray.length-1];
-      const eyeCx = ((left.x || 0) + (right.x || 0)) / 2;
-      const eyeCy = ((left.y || 0) + (right.y || 0)) / 2;
-      const iod = Math.hypot((right.x || 0) - (left.x || 0), (right.y || 0) - (left.y || 0)) || 1e-6;
-  const def = { REF_EYE_CX: 0.5034, REF_EYE_CY: 0.6058, REF_IOD: 0.45 };
-  const ref = (window && window.__lastCalibration && window.__lastCalibration.ref) ? window.__lastCalibration.ref : def;
-  const REF_EYE_CX = ref.REF_EYE_CX ?? def.REF_EYE_CX;
-  const REF_EYE_CY = ref.REF_EYE_CY ?? def.REF_EYE_CY;
-  const REF_IOD = ref.REF_IOD ?? def.REF_IOD;
-  const scale = REF_IOD / iod;
-      return eyeArray.map(p => {
-        const nx = ( (p.x || 0) - eyeCx ) * scale + REF_EYE_CX;
-        const ny = ( (p.y || 0) - eyeCy ) * scale + REF_EYE_CY;
-        return { idx: p.idx, x: nx, y: ny };
-      });
+      const t = computeCalibrationTransform(eyeArray);
+      if (!t) return null;
+      return applyCalibrationToLandmarks(eyeArray, t) || null;
     } catch (e) { return null; }
   }
 
