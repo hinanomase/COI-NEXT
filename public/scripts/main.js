@@ -16,8 +16,10 @@ import {
   pauseProcessing,
   resumeProcessing,
 } from "./mediapipe.js";
+import { Agent } from './agent.js';
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
 import { DataAnalyzer } from "./dataAnalyzer.js";
+import { chatTextToText, transcribeAudioVAD, ttsSpeak } from "./interactions.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   // ===== DOM参照 =====
@@ -45,7 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let participantNameRaw = null; // human-readable, may contain Japanese
   let participantNameSafe = null; // file-safe encoded name
 
-  //toggleDebugMode(true);
+  // toggleDebugMode(false);
 
   // create a simple modal for participant name input
   function createNameModal() {
@@ -68,8 +70,32 @@ document.addEventListener("DOMContentLoaded", () => {
       participantNameRaw = v;
       try { participantNameSafe = encodeURIComponent(participantNameRaw); } catch(e) { participantNameSafe = participantNameRaw.replace(/[/\\]/g,'_'); }
       modal.remove();
-      // after name entry, automatically start the main Start flow (user gesture performed)
-      setTimeout(() => { if (typeof btnStart?.click === 'function') btnStart.click(); else handleStart(); }, 50);
+      // show the agent overlay after name entry and wait until it's hidden before proceeding
+      (async () => {
+        try {
+          console.debug('[Main] calling Agent.showAgent');
+          await Agent.showAgent();
+          console.debug('[Main] Agent.showAgent returned');
+          console.debug('[Main] calling chatTextToAudio');
+          try {
+            const transcription = await transcribeAudioVAD();
+            console.debug('[Main] transcribeAudioVAD returned', transcription);
+            const response = await chatTextToText("映画を観た感想は？という質問に対する回答です。短くリアクションしてください。追加で質問はしないでください。", transcription.text);
+            await ttsSpeak("少し明るめで淡々と説明するように", response.text);
+            // await ttsSpeak(
+            //   "少し明るめで淡々と説明するように", 
+            //   `はじめまして、${participantNameRaw}さん。これから実験を始めます。よろしくお願いします。
+            //   まずは視線の計測から始めます。顔を動かさないように画面の青い点を目で追ってください。`, 
+            //   {});
+            console.debug('[Main] chatTextToAudio returned');
+            await Agent.hideAgent();
+          } catch (err) {
+            console.error('[Main] chatTextToAudio error', err);
+          }
+        } catch (e) { console.warn('[Main] Agent.showAgent failed', e); }
+        // after agent overlay closed, continue with start flow (user gesture performed)
+        // setTimeout(() => { if (typeof btnStart?.click === 'function') btnStart.click(); else if (typeof handleStart === 'function') handleStart(); }, 50);
+      })();
     });
     return modal;
   }
@@ -171,8 +197,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       if ('wakeLock' in navigator && !__wakeLock) {
         __wakeLock = await navigator.wakeLock.request('screen');
-        __wakeLock.addEventListener('release', () => { console.log('[Main] WakeLock released'); __wakeLock = null; });
-        console.log('[Main] WakeLock acquired');
+        __wakeLock.addEventListener('release', () => { console.debug('[Main] WakeLock released'); __wakeLock = null; });
+        console.debug('[Main] WakeLock acquired');
       }
     } catch (e) {
       console.warn('[Main] failed to acquire WakeLock', e);
@@ -219,7 +245,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (e) { console.warn('[Main] preloadMovies failed for', id, e); }
     });
     try { await Promise.all(promises); } catch(e){}
-    console.log('[Main] preloadMovies finished', Object.keys(window.__preloadedMovies));
+    console.debug('[Main] preloadMovies finished', Object.keys(window.__preloadedMovies));
   }
 
   // debug mode detection and toggle
@@ -367,18 +393,18 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!canvas) { console.warn('no canvas', id); return; }
       const wrap = canvas.closest('.canvas-square');
       console.group(`canvas:${id}`);
-      console.log('elementRect:', canvas.getBoundingClientRect());
-      if (wrap) console.log('wrapperRect:', wrap.getBoundingClientRect());
+      console.debug('elementRect:', canvas.getBoundingClientRect());
+      if (wrap) console.debug('wrapperRect:', wrap.getBoundingClientRect());
       const cs = window.getComputedStyle(wrap || canvas);
-      console.log('display:', cs.display, 'visibility:', cs.visibility, 'width/height:', cs.width, cs.height);
+      console.debug('display:', cs.display, 'visibility:', cs.visibility, 'width/height:', cs.width, cs.height);
       console.groupEnd();
     });
-    console.log('agent-row:', document.querySelector('.agent-row')?.getBoundingClientRect());
-    console.log('topGrid:', document.getElementById('topGrid')?.getBoundingClientRect());
+    console.debug('agent-row:', document.querySelector('.agent-row')?.getBoundingClientRect());
+    console.debug('topGrid:', document.getElementById('topGrid')?.getBoundingClientRect());
   };
 
   window.refreshCanvas = (canvasId) => {
-    const c = __canvasControllers[canvasId]; if (c && typeof c.refresh === 'function') { c.refresh(); console.log('[Main] refreshed', canvasId); }
+    const c = __canvasControllers[canvasId]; if (c && typeof c.refresh === 'function') { c.refresh(); console.debug('[Main] refreshed', canvasId); }
     else console.warn('no refreshable canvas controller for', canvasId);
   };
 
@@ -403,7 +429,7 @@ document.addEventListener("DOMContentLoaded", () => {
   //   // service-worker.js is served from /public/, so the registration scope must be within /public/
   //   navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
   //     .then(reg => {
-  //       console.log('ServiceWorker registered (scope: ' + reg.scope + ')');
+  //       console.debug('ServiceWorker registered (scope: ' + reg.scope + ')');
 
   //       // 更新を検知してユーザーに通知するサンプル（任意）
   //       reg.addEventListener('updatefound', () => {
@@ -412,10 +438,10 @@ document.addEventListener("DOMContentLoaded", () => {
   //           if (newSW.state === 'installed') {
   //             // 新しいコンテンツがキャッシュされ、次回ロード時に使われます
   //             if (navigator.serviceWorker.controller) {
-  //               console.log('New content available - please refresh.');
+  //               console.debug('New content available - please refresh.');
   //               // ここで UI を出して「更新」ボタンを促すなどの処理を入れる
   //             } else {
-  //               console.log('Content cached for offline use.');
+  //               console.debug('Content cached for offline use.');
   //             }
   //           }
   //         });
@@ -457,7 +483,7 @@ document.addEventListener("DOMContentLoaded", () => {
     hideImages();
 
     try {
-      console.log("[Main] Start → MediaPipe初期化");
+      console.debug("[Main] Start → MediaPipe初期化");
       await mediapipeInitAndStart();
 
       // preload movies to reduce buffering during experiment
@@ -466,7 +492,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // try to acquire wake lock to prevent screen dimming
       try { await requestWakeLock(); } catch(e) { /* ignore */ }
 
-      console.log("[Main] キャリブレーション開始");
+      console.debug("[Main] キャリブレーション開始");
       calib = await runCalibration();
 
   // expose calibration info globally so save routine can include baselines and gaze coeffs
@@ -481,7 +507,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // === 視線割合の集計を開始（キャリブ完了後〜Stopまで） ===
       setupGazeAggregation();
 
-  console.log("[Main] キャリブレーション完了 → エージェント表示");
+  console.debug("[Main] キャリブレーション完了 → エージェント表示");
   showImages();
 
       // start the experiment orchestration after calibration
@@ -502,7 +528,7 @@ document.addEventListener("DOMContentLoaded", () => {
     isRunning = false;
     setBtnState(false);
 
-    console.log("[Main] Stop → 停止処理開始");
+    console.debug("[Main] Stop → 停止処理開始");
 
     // タイマー解除
     if (autoStopTimer) {
@@ -552,7 +578,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (openInfo)  openInfo.textContent = "Open: —%";
     if (closedInfo) closedInfo.setAttribute("aria-hidden", "true");
 
-    console.log("[Main] 停止処理完了");
+    console.debug("[Main] 停止処理完了");
   };
 
   // ===== ボタン配線 =====
@@ -970,7 +996,7 @@ function renderFinalResults(panel, gazeRes) {
     window.addEventListener("gaze:in_bounds", onGazeIn);
     window.addEventListener("gaze:out_of_bounds", onGazeOOB);
 
-    console.log("[Main] 視線割合集計を開始");
+    console.debug("[Main] 視線割合集計を開始");
   }
 
   function teardownGazeAggregation(){
@@ -1005,7 +1031,7 @@ function renderFinalResults(panel, gazeRes) {
       durationSec: Math.round(durMs / 1000)
     };
 
-    console.log("[Main] 視線割合集計結果:", result);
+    console.debug("[Main] 視線割合集計結果:", result);
 
     onGazeIn = null; onGazeOOB = null; gazeCounts = null;
     return result;

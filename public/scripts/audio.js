@@ -1,9 +1,9 @@
-// import { Agent } from './agent.js';
+import { Agent } from './agent.js';
 
 const audio = new Audio();
 
-audio.onplay = () => Agent.startAgentSpeak();
-audio.onended = () => Agent.stopAgentSpeak();
+audio.onplay = () => { try { Agent.startAgentSpeak(); } catch(e){} };
+audio.onended = () => { try { Agent.stopAgentSpeak(); } catch(e){} };
 
 export function playAudioBlob(blob) {
   return new Promise((resolve, reject) => {

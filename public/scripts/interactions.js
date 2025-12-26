@@ -4,13 +4,14 @@
 
 
 import { dataChannel, transcriptionDataChannel } from './session.js';
-// import { Agent } from './agent.js';
+import { Agent } from './agent.js';
 import { webSocket } from './websocket.js';
 import { playAudioBlob, enableMic, disableMic } from './audio.js';
-import { TTS_ENDPOINT } from './config.js';
+import { CHAT_COMPLETION_ENDPOINT, TRANSCRIPTION_ENDPOINT, TTS_ENDPOINT } from './config.js';
+import { recordVAD } from './vad.js';
 
 export async function fetchQuestion() {
-  console.log("fetch Question");
+  console.debug("fetch Question");
 
   return new Promise((resolve) => {
     const onQuestion = (event) => {
@@ -30,7 +31,7 @@ export async function fetchQuestion() {
 }
 
 export async function playTextAsAudio(text) {
-  console.log("play question");
+  console.debug("play question");
 
   // const instruction = "次の回答では質問文をユーザーにそのまま返してください";
   // await sendInstruction(instruction);
@@ -73,8 +74,94 @@ export async function playTextAsAudio(text) {
   // addBubble(text);
 }
 
+/**
+ * Front-end only: send text to OpenAI Chat Completions (gpt-audio-2025-08-28)
+ * and play returned audio. Caller must provide a valid `apiKey`.
+ * opts: { role = 'user', temperature = 0.2, voice = 'alloy', format = 'wav' }
+ */
+// Deprecated: chatTextToAudio client-side usage removed — server now handles chat completions.
+
+/**
+ * Front-end only: record short audio from mic and send it to model, receive audio response and play.
+ * Caller must provide apiKey. durationSeconds defaults to 5.
+ * opts similar to chatTextToAudio.
+ */
+// Deprecated: chatAudioToAudio removed — server will handle chat completions and transcription.
+
+/**
+ * Record audio and send to backend for transcription/chat processing.
+ * Backend endpoint: POST /api/chat_audio (multipart/form-data with 'file' and optional 'instruction')
+ * Returns JSON: { text: string, raw: any }
+ */
+
+// VAD-based recording is provided by recordVAD (see bottom of file for export)
+
+export async function chatTextToText(instruction = '', text) {
+  const resp = await fetch(CHAT_COMPLETION_ENDPOINT, 
+    { method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ instruction: instruction, text: text }) 
+    });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error('Server transcription failed: ' + resp.status + ' ' + txt);
+  }
+  const data = await resp.json();
+  // if (data?.text) addBubble(data.text);
+  console.debug('[interactions] chatTextToText response', data);
+  return data;
+}
+
+/**
+ * Upload arbitrary audio Blob to /api/transcription and return transcription JSON.
+ * If you want VAD-based capture, use `transcribeAudioVAD` which wraps `recordVAD`.
+ */
+export async function transcribeAudioFile(blob, filename = 'audio.wav') {
+  const form = new FormData();
+  form.append('file', blob, filename);
+
+  const resp = await fetch(TRANSCRIPTION_ENDPOINT, { method: 'POST', body: form });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error('Transcription failed: ' + resp.status + ' ' + txt);
+  }
+  return resp.json();
+}
+
+export async function transcribeAudioVAD(durationSeconds = 30) {
+  const rec = await recordVAD({ maxDurationSec: durationSeconds, debug: false });
+  return await transcribeAudioFile(rec.blob, 'utterance.wav');
+}
+
+/**
+ * Text → TTS using Audio Speeches/gpt-4o-mini-tts-2025-12-15
+ * Tries the speech endpoint first, then falls back to chat completions if needed.
+ * opts: { voice = 'alloy', format = 'wav' }
+ */
+export async function ttsSpeak(instructions, text) {
+  // console.debug('[interactions] ttsSpeak start (proxy->/api/tts)', { voice, format, textLength: (text||'').length });
+  try {
+      const resp = await fetch(TTS_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice: "marin", instructions: instructions, speed: 1.0 }),
+    });
+
+    if (!resp.ok) {
+      console.error("TTS API エラー");
+      return;
+    }
+
+    const blob = await resp.blob();
+    await playAudioBlob(blob);
+    addBubble(text);
+  } catch (e) {
+    console.debug('[interactions] /api/tts request error', e);
+  }
+}
+
 export function getUserResponse() {
-  console.log("user response");
+  console.debug("user response");
   enableMic();
   document.getElementById("btnMic").disabled = false;
 
@@ -89,7 +176,7 @@ export function getUserResponse() {
           transcriptionDataChannel.removeEventListener("message", onMessage);
           disableMic();
           document.getElementById("btnMic").disabled = true;
-          console.log("user text", userText);
+          console.debug("user text", userText);
           resolve(userText);
         }
       }
@@ -100,7 +187,7 @@ export function getUserResponse() {
 }
 
 export async function playAgentReaction(userText) {
-  console.log("agent reaction");
+  console.debug("agent reaction");
 
   const instruction = "次の回答ではユーザーの回答に対して軽くリアクションしてください．追加で質問はしないでください";
   await sendInstruction(instruction);
