@@ -121,23 +121,28 @@ export async function stopMediaPipeAll() {
 
 /** サーバ送信（必要に応じて） */
 export async function sendEyeLandmarkData(options = {}) {
-  // Save collectedData to a local JSON file (trigger download)
   try {
-    const session_id = getOrCreateSessionId();
-    const ts = Date.now();
-    const name = options.name ? String(options.name) : null; // display name (can be Japanese)
-    const nameSafe = options.nameSafe ? String(options.nameSafe) : null; // file-safe name
-    const phase = options.phase ? String(options.phase) : null;
-    const basePrefix = nameSafe ? nameSafe : (name ? encodeURIComponent(name) : `eye_capture_${session_id}`);
+    // include participant group in saved filenames/meta if present
+    const groupFromWindow = (typeof window !== 'undefined' && window.__participantGroup) ? window.__participantGroup : null;
+    const group = options.group || groupFromWindow || null;
+     const session_id = getOrCreateSessionId();
+     const ts = Date.now();
+     const name = options.name ? String(options.name) : null; // display name (can be Japanese)
+     const nameSafe = options.nameSafe ? String(options.nameSafe) : null; // file-safe name
+     const phase = options.phase ? String(options.phase) : null;
+    const groupPart = group ? `_${group}` : '';
+    const basePrefix = nameSafe ? `${nameSafe}${groupPart}` : (name ? `${encodeURIComponent(name)}${groupPart}` : `eye_capture_${session_id}${groupPart}`);
     const baseName = phase ? `${basePrefix}_${phase}_${ts}` : `${basePrefix}_${ts}`;
-  // NOTE: meta is included in finalResults.json, so do not emit a separate meta JSON to avoid duplication
-    // eye frames
-    const eyeBlob = new Blob([JSON.stringify(collectedEyeFrames, null, 2)], { type: 'application/json' });
-    downloadBlob(eyeBlob, `${baseName}_eyeFrames.json`);
-    // gaze frames
-    const gazeBlob = new Blob([JSON.stringify(collectedGazeFrames, null, 2)], { type: 'application/json' });
-    downloadBlob(gazeBlob, `${baseName}_gazeFrames.json`);
-  // NOTE: raw openRatios are no longer emitted; use normalizedOpenSeries.json instead
+     // NOTE: meta is included in finalResults.json, so do not emit a separate meta JSON to avoid duplication
+     // eye frames
+    // ensure meta contains group
+    try { if (!collectedMeta) collectedMeta = {}; collectedMeta.group = group || null; } catch(e){}
+     const eyeBlob = new Blob([JSON.stringify(collectedEyeFrames, null, 2)], { type: 'application/json' });
+     downloadBlob(eyeBlob, `${baseName}_eyeFrames.json`);
+     // gaze frames
+     const gazeBlob = new Blob([JSON.stringify(collectedGazeFrames, null, 2)], { type: 'application/json' });
+     downloadBlob(gazeBlob, `${baseName}_gazeFrames.json`);
+     // NOTE: raw openRatios are no longer emitted; use normalizedOpenSeries.json instead
 
     // additional: normalized open series from main.js (if present)
     try {
@@ -183,9 +188,11 @@ export async function sendEyeLandmarkData(options = {}) {
       } catch(e){}
 
       const finalResults = { session_id, ts, meta, openSummary, gazeSummary };
-      const finalBlob = new Blob([JSON.stringify(finalResults, null, 2)], { type: 'application/json' });
-      downloadBlob(finalBlob, `${baseName}_finalResults.json`);
-    } catch(e){}
+      // include group in final results meta if available
+      try { finalResults.meta = finalResults.meta || {}; if (group) finalResults.meta.group = group; } catch(e){}
+     const finalBlob = new Blob([JSON.stringify(finalResults, null, 2)], { type: 'application/json' });
+     downloadBlob(finalBlob, `${baseName}_finalResults.json`);
+   } catch(e){}
 
   console.log(`[MediaPipe] Downloaded data files (eye:${collectedEyeFrames.length}, gaze:${collectedGazeFrames.length})`);
   } catch (e) {

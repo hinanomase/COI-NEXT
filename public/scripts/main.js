@@ -24,6 +24,36 @@ import { DataAnalyzer } from "./dataAnalyzer.js";
 import { chatTextToText, chatTextToAudio, transcribeAudioVAD, ttsSpeak } from "./interactions.js";
 
 document.addEventListener("DOMContentLoaded", () => {
+    // URL からグループを判別してグローバルに保持（?group=1|2 または ?group=movie1|movie2）
+    function parseGroupFromUrl() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        let g = params.get('group') || params.get('cond') || params.get('movie') || null;
+        if (!g) return 'movie1';
+        g = String(g).toLowerCase();
+        if (g === '1') return 'movie1';
+        if (g === '2') return 'movie2';
+        if (/^movie[12]$/.test(g)) return g;
+        return g;
+      } catch (e) { return 'movie1'; }
+    }
+    const participantGroup = parseGroupFromUrl();
+    window.__participantGroup = participantGroup;
+    window.__participantGroupLabel = (participantGroup === 'movie1') ? 'horror' : (participantGroup === 'movie2') ? 'calm' : participantGroup;
+    console.debug('[Main] participantGroup:', window.__participantGroup, window.__participantGroupLabel);
+    // helper: decide which movie id to play based on parsed group
+    function getMovieForParticipant() {
+      try {
+        const g = (window.__participantGroup || 'movie1').toString().toLowerCase();
+        if (g === 'movie2' || g === '2') return 'movie2';
+        // support movie1/movie2 or numeric 1/2
+        if (g === 'movie1' || g === '1') return 'movie1';
+        // if group already encodes a movie filename, return it
+        if (/^movie[0-9\-a-z]+$/i.test(g)) return g;
+        return 'movie1';
+      } catch (e) { return 'movie1'; }
+    }
+
   // ===== DOM参照 =====
   const appContainer = document.getElementById("app");
   const dividerToggle = document.getElementById("dividerToggle");
@@ -676,7 +706,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // finalize aggregation summaries for this block
       try { window.__lastGazeResult = teardownGazeAggregation(); } catch (e) {}
       try { window.__lastOpenSummary = analyzer.summarize(); } catch (e) {}
-      await sendEyeLandmarkData({ name: participantNameRaw || null, nameSafe: participantNameSafe || null, phase: phaseLabel });
+      await sendEyeLandmarkData({ name: participantNameRaw || null, nameSafe: participantNameSafe || null, phase: phaseLabel, group: window.__participantGroup || null });
     } catch (e) { console.debug('[Main] failed to save phase data', e); }
   }
 
@@ -750,7 +780,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try { hideImages(); } catch(e){}
     showMessage('続いて動画を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
     await new Promise(r => setTimeout(r, 5000));
-    await playMovie('movie1', 300);
+    await playMovie(getMovieForParticipant(), 300);
 
       // images 1-2
     try { showImages(); } catch(e){}
@@ -1248,9 +1278,12 @@ function renderFinalResults(panel, gazeRes) {
   // アンケート結果をローカルに保存（他の Gaze と同様の命名規則）
   function saveSurveyResults(obj, tag = 'survey') {
     try {
+      // attach group info
+      try { obj.group = window.__participantGroup || null; } catch(e){}
       const base = participantNameSafe || 'participant';
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `${base}_${tag}_${ts}.json`;
+      const groupPart = (window.__participantGroup) ? `${window.__participantGroup}` : 'group';
+      const filename = `${base}_${tag}_${groupPart}_${ts}.json`;
       const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
