@@ -1,4 +1,6 @@
 import { Agent } from './agent.js';
+import { addBubble, addBubbleTyped } from './interactions.js';
+import { AGENT_TEXT } from './config.js';
 
 const audio = new Audio();
 
@@ -25,6 +27,43 @@ export function playAudioBlob(blob) {
     });
 
     audio.play().catch(reject);
+  });
+}
+
+export function playVoiceFile(number, chatInterval = 150) {
+  return new Promise((resolve, reject) => {
+    if (!number) {
+      reject(new Error('file number is required'));
+      return;
+    }
+    console.debug('[Audio] playVoiceFile called with number:', number);
+    // const audioURL = `/COI-NEXT-frontend/public/assets/voice/agent_voice_${number}.wav`;
+    const audioURL = `/public/assets/voice/agent_voice_${number}.wav`;
+    const player = new Audio(audioURL);
+    player.preload = 'auto';
+
+    player.addEventListener('playing', () => {
+      try { 
+        Agent.startAgentSpeak();
+       } catch (e) {}
+      console.debug('[Audio] calling addBubble for number:', number);
+      addBubbleTyped(AGENT_TEXT[number - 1], false, chatInterval);
+    });
+
+    player.addEventListener('ended', () => {
+      try { Agent.stopAgentSpeak(); } catch (e) {}
+      resolve();
+    });
+
+    player.addEventListener('error', (e) => {
+      try { Agent.stopAgentSpeak(); } catch (err) {}
+      reject(e);
+    });
+
+    player.play().catch(err => {
+      try { Agent.stopAgentSpeak(); } catch (e) {}
+      reject(err);
+    });
   });
 }
 

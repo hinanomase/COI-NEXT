@@ -17,9 +17,11 @@ import {
   resumeProcessing,
 } from "./mediapipe.js";
 import { Agent } from './agent.js';
+import { playVoiceFile } from "./audio.js";
+import { addBubble, clearBubbles } from "./interactions.js";
 import { runCalibration, computeEyeOpenRatio } from "./calibration.js";
 import { DataAnalyzer } from "./dataAnalyzer.js";
-import { chatTextToText, transcribeAudioVAD, ttsSpeak } from "./interactions.js";
+import { chatTextToText, chatTextToAudio, transcribeAudioVAD, ttsSpeak } from "./interactions.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   // ===== DOM参照 =====
@@ -58,7 +60,15 @@ document.addEventListener("DOMContentLoaded", () => {
     Object.assign(box.style, { background: '#fff', padding: '18px', borderRadius: '8px', minWidth: '320px', textAlign: 'center' });
     const title = document.createElement('div'); title.textContent = '参加者情報'; title.style.fontWeight = '700'; title.style.marginBottom = '8px'; title.style.color = 'black';
     const desc = document.createElement('div'); desc.textContent = '名前を入力してください'; desc.style.marginBottom = '10px'; desc.style.color = 'black';
-    const input = document.createElement('input'); input.type = 'text'; input.placeholder = '氏名'; input.style.width = '100%'; input.style.padding = '8px'; input.style.marginBottom = '10px';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'participantName';
+    input.name = 'participantName';
+    input.setAttribute('aria-label', '参加者名');
+    input.placeholder = '氏名';
+    input.style.width = '100%';
+    input.style.padding = '8px';
+    input.style.marginBottom = '10px';
     const btn = document.createElement('button'); btn.textContent = '開始'; btn.style.padding = '8px 12px'; btn.style.cursor = 'pointer';
     box.appendChild(title); box.appendChild(desc); box.appendChild(input); box.appendChild(btn);
     modal.appendChild(box);
@@ -75,24 +85,103 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
           console.debug('[Main] calling Agent.showAgent');
           await Agent.showAgent();
-          console.debug('[Main] Agent.showAgent returned');
-          console.debug('[Main] calling chatTextToAudio');
-          try {
-            const transcription = await transcribeAudioVAD();
-            console.debug('[Main] transcribeAudioVAD returned', transcription);
-            const response = await chatTextToText("映画を観た感想は？という質問に対する回答です。短くリアクションしてください。追加で質問はしないでください。", transcription.text);
-            await ttsSpeak("少し明るめで淡々と説明するように", response.text);
+          // console.debug('[Main] calling chatTextToAudio');
+          
+          // try {
             // await ttsSpeak(
             //   "少し明るめで淡々と説明するように", 
             //   `はじめまして、${participantNameRaw}さん。これから実験を始めます。よろしくお願いします。
-            //   まずは視線の計測から始めます。顔を動かさないように画面の青い点を目で追ってください。`, 
-            //   {});
-            console.debug('[Main] chatTextToAudio returned');
-            await Agent.hideAgent();
+            //   まずは視線の計測から始めます。顔を動かさないように画面の青い点を目で追ってください。`,
+            // );
+            // const transcription = await transcribeAudioVAD();
+            // console.debug('[Main] transcribeAudioVAD returned', transcription);
+            // const response = await chatTextToText("ツールから返された文章は「」の中をそのまま一字一句違わず音声で繰り返してください。「」内の言葉遣いを変えたり前後に文章を付け加えたりしないでください。", "実験の説明をしてください。");
+            // const response = await chatTextToAudio(
+            //   "「experiment_description」と言われたら関数呼び出しを行ってください。", 
+            //   "experiment_description"
+            // );
+            // const response = await chatTextToAudio(
+            //   "「」の中をそのまま一字一句違わず音声で繰り返してください。「」内の言葉遣いを変えたり前後に文章を付け加えたりしないでください。合図地や返事も不要です。明るい声でゆっくりはっきり喋ってください。", 
+            //   "「これから実験を始めます。最初に視線の計測を行います。顔を動かさず、画面の点を目で追ってください。」"
+            // );
+            // console.debug('[Main] chatTextToText returned', response);
+            // const response = await chatTextToText("映画を観た感想は？という質問に対する回答です。1文で短くリアクションしてください。追加で質問はしないでください。", transcription.text);
+            // // await ttsSpeak("少し明るめで淡々と説明するように", response.text);
+            // await ttsSpeak(
+            //   "少し明るめで淡々と説明するように", 
+            //   response.text
+            // );
+            // console.debug('[Main] chatTextToAudio returned');
+            try {
+              await new Promise((resolve) => {
+                const onProcess = (ev) => {
+                  try {
+                    if (ev?.detail?.status === 'DisplayCompletedBoyA') {
+                      document.removeEventListener('processCompleted', onProcess);
+                      resolve();
+                    }
+                  } catch (e) { /* ignore */ }
+                };
+                document.addEventListener('processCompleted', onProcess);
+              });
+            } catch (err) {
+              console.debug('[Main] waiting for processCompleted failed', err);
+            }
+
+          // イベント受信後に音声再生
+          try {
+            await playVoiceFile(1, 155); // 必要に応じて番号を変更
           } catch (err) {
-            console.error('[Main] chatTextToAudio error', err);
+            console.debug('[Main] playVoiceFile failed', err);
           }
-        } catch (e) { console.warn('[Main] Agent.showAgent failed', e); }
+
+          // 再生終了後に「次へ」ボタンを表示し，クリックでエージェントを閉じる
+          await new Promise((resolve) => {
+            try {
+              const overlay = document.getElementById('agentOverlay');
+              if (!overlay) { resolve(); return; }
+
+              // 既存ボタンがあれば除去
+              const existing = document.getElementById('agentNextBtn');
+              if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+              const btn = document.createElement('button');
+              btn.id = 'agentNextBtn';
+              btn.textContent = '次へ';
+              Object.assign(btn.style, {
+                position: 'absolute',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                bottom: '6vh',
+                zIndex: 20150,
+                padding: '10px 18px',
+                fontSize: '18px',
+                borderRadius: '10px',
+                border: 'none',
+                cursor: 'pointer',
+                background: 'linear-gradient(90deg,#4b8cff,#3366ff)',
+                color: '#fff',
+                boxShadow: '0 8px 20px rgba(0,0,0,0.18)'
+              });
+
+              overlay.appendChild(btn);
+
+              btn.addEventListener('click', async () => {
+                try { btn.remove(); } catch (e) {}
+                try { 
+                  await Agent.hideAgent();
+                  await handleStart();
+                  // await runExperimentSequence();
+                 } catch (e) { console.debug('[Main] Agent.hideAgent failed', e); }
+                resolve();
+              }, { once: true });
+            } catch (e) {
+              console.debug('[Main] failed to create next button', e);
+              resolve();
+            }
+          });
+
+        } catch (e) { console.debug('[Main] Agent.showAgent failed', e); }
         // after agent overlay closed, continue with start flow (user gesture performed)
         // setTimeout(() => { if (typeof btnStart?.click === 'function') btnStart.click(); else if (typeof handleStart === 'function') handleStart(); }, 50);
       })();
@@ -134,11 +223,11 @@ document.addEventListener("DOMContentLoaded", () => {
           // wait for a layout frame then a short delay to ensure wrappers are visible
           await new Promise(r => requestAnimationFrame(r));
           await new Promise(r => setTimeout(r, 60));
-          try { showImages(); } catch (e) { console.warn('[Main] deferred showImages failed', e); }
-          try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) { console.warn('[Main] deferred leftImg.refresh failed', e); }
-          try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) { console.warn('[Main] deferred rightImg.refresh failed', e); }
+          try { showImages(); } catch (e) { console.debug('[Main] deferred showImages failed', e); }
+          try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) { console.debug('[Main] deferred leftImg.refresh failed', e); }
+          try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) { console.debug('[Main] deferred rightImg.refresh failed', e); }
         } catch (e) {
-          console.warn('[Main] error while performing deferred showImages', e);
+          console.debug('[Main] error while performing deferred showImages', e);
         }
       })();
     }
@@ -201,7 +290,7 @@ document.addEventListener("DOMContentLoaded", () => {
         console.debug('[Main] WakeLock acquired');
       }
     } catch (e) {
-      console.warn('[Main] failed to acquire WakeLock', e);
+      console.debug('[Main] failed to acquire WakeLock', e);
       __wakeLock = null;
     }
   }
@@ -213,7 +302,7 @@ document.addEventListener("DOMContentLoaded", () => {
         __wakeLock = null;
       }
     } catch (e) {
-      console.warn('[Main] failed to release WakeLock', e);
+      console.debug('[Main] failed to release WakeLock', e);
       __wakeLock = null;
     }
   }
@@ -242,7 +331,7 @@ document.addEventListener("DOMContentLoaded", () => {
         promises.push(p);
         // call load to start network fetch
         try { v.load(); } catch(e) {}
-      } catch (e) { console.warn('[Main] preloadMovies failed for', id, e); }
+      } catch (e) { console.debug('[Main] preloadMovies failed for', id, e); }
     });
     try { await Promise.all(promises); } catch(e){}
     console.debug('[Main] preloadMovies finished', Object.keys(window.__preloadedMovies));
@@ -351,7 +440,7 @@ document.addEventListener("DOMContentLoaded", () => {
           console.debug('[Main] image loaded', canvasId, s, 'natural=', img.naturalWidth+'x'+img.naturalHeight);
           render();
         } catch(e){} };
-      img.onerror = () => { console.warn('[Main] failed to load image', s); };
+      img.onerror = () => { console.debug('[Main] failed to load image', s); };
       img.src = s;
     }
 
@@ -366,7 +455,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const ch = canvas.height / dpr;
         try { ctx.clearRect(0, 0, cw, ch); } catch(e) { /* ignore */ }
       } catch (e) {
-        console.warn('[Main] clear canvas failed', canvasId, e);
+        console.debug('[Main] clear canvas failed', canvasId, e);
       }
     }
 
@@ -383,14 +472,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const rightImg = createCanvasImageController('myCanvas2', 'assets/img/sad/sad (1).png', { alignment: 'right', margin: 12 });
   // global helper for runtime switching (for debugging/testing)
   window.setCanvasImage = (canvasId, src) => {
-    const c = __canvasControllers[canvasId]; if (c) c.setSrc(src); else console.warn('no canvas controller', canvasId);
+    const c = __canvasControllers[canvasId]; if (c) c.setSrc(src); else console.debug('no canvas controller', canvasId);
   };
 
   // debug helpers: inspect sizes and force redraw from console
   window.debugCanvasInfo = () => {
     ['myCanvas1','myCanvas2'].forEach(id => {
       const canvas = document.getElementById(id);
-      if (!canvas) { console.warn('no canvas', id); return; }
+      if (!canvas) { console.debug('no canvas', id); return; }
       const wrap = canvas.closest('.canvas-square');
       console.group(`canvas:${id}`);
       console.debug('elementRect:', canvas.getBoundingClientRect());
@@ -405,7 +494,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.refreshCanvas = (canvasId) => {
     const c = __canvasControllers[canvasId]; if (c && typeof c.refresh === 'function') { c.refresh(); console.debug('[Main] refreshed', canvasId); }
-    else console.warn('no refreshable canvas controller for', canvasId);
+    else console.debug('no refreshable canvas controller for', canvasId);
   };
 
   // ===== 追加: 視線集計用の状態 =====
@@ -423,32 +512,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let autoStopTimer = null; // ← 自動停止用タイマーID
   // when true, the next call to showMessage() will unhide images and refresh canvases once
   let __deferShowImagesAfterNextMessage = false;
-
-  // Service Worker 登録（PWA） — DOMContentLoaded の中に置く
-  // if ('serviceWorker' in navigator) {
-  //   // service-worker.js is served from /public/, so the registration scope must be within /public/
-  //   navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-  //     .then(reg => {
-  //       console.debug('ServiceWorker registered (scope: ' + reg.scope + ')');
-
-  //       // 更新を検知してユーザーに通知するサンプル（任意）
-  //       reg.addEventListener('updatefound', () => {
-  //         const newSW = reg.installing;
-  //         newSW.addEventListener('statechange', () => {
-  //           if (newSW.state === 'installed') {
-  //             // 新しいコンテンツがキャッシュされ、次回ロード時に使われます
-  //             if (navigator.serviceWorker.controller) {
-  //               console.debug('New content available - please refresh.');
-  //               // ここで UI を出して「更新」ボタンを促すなどの処理を入れる
-  //             } else {
-  //               console.debug('Content cached for offline use.');
-  //             }
-  //           }
-  //         });
-  //       });
-  //     })
-  //     .catch(err => console.warn('ServiceWorker registration failed:', err));
-  // }
 
   // ===== エージェントの表示/非表示 =====
   const hideImages = () => {
@@ -472,7 +535,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // btnToggle.style.display = 'none';
 
   // show name entry modal on load
-  try { createNameModal(); } catch(e) { console.warn('failed to create name modal', e); }
+  try { createNameModal(); } catch(e) { console.debug('failed to create name modal', e); }
 
   // ===== Start / Stop =====
   const handleStart = async () => {
@@ -487,7 +550,8 @@ document.addEventListener("DOMContentLoaded", () => {
       await mediapipeInitAndStart();
 
       // preload movies to reduce buffering during experiment
-      try { preloadMovies(['movie1-1','movie1-2','movie2-1','movie2-2']); } catch(e) { console.warn('[Main] preloadMovies failed', e); }
+      // try { preloadMovies(['movie1-1','movie1-2','movie2-1','movie2-2']); } catch(e) { console.debug('[Main] preloadMovies failed', e); }
+      // try { preloadMovies(['movie1']); } catch(e) { console.debug('[Main] preloadMovies failed', e); }
 
       // try to acquire wake lock to prevent screen dimming
       try { await requestWakeLock(); } catch(e) { /* ignore */ }
@@ -502,7 +566,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // reset normalized series
   window.__normalizedOpenSeries = [];
   // align mediapipe storage start with normalized open series start
-  try { resetCollectedData(); } catch(e) { console.warn('[Main] failed to reset collected data', e); }
+  try { resetCollectedData(); } catch(e) { console.debug('[Main] failed to reset collected data', e); }
 
       // === 視線割合の集計を開始（キャリブ完了後〜Stopまで） ===
       setupGazeAggregation();
@@ -514,8 +578,8 @@ document.addEventListener("DOMContentLoaded", () => {
       await runExperimentSequence();
 
     } catch (e) {
-      console.error("[Main] Startフロー失敗:", e);
-      alert("キャリブレーションまたは初期化に失敗しました。");
+      console.debug("[Main] Startフロー失敗:", e);
+      // alert("キャリブレーションまたは初期化に失敗しました。");
       isRunning = false;
       setBtnState(false);
       hideImages();
@@ -551,7 +615,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const openSummary = analyzer.summarize();
       window.__lastOpenSummary = openSummary;
     } catch (e) {
-      console.warn('[Main] failed to produce open summary for saving', e);
+      console.debug('[Main] failed to produce open summary for saving', e);
       window.__lastOpenSummary = null;
     }
 
@@ -559,7 +623,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try { await stopMediaPipeAll(); } catch {}
 
   // release wake lock if held
-  try { await releaseWakeLock(); } catch(e) { console.warn('[Main] releaseWakeLock failed', e); }
+  try { await releaseWakeLock(); } catch(e) { console.debug('[Main] releaseWakeLock failed', e); }
 
     hideImages();
 
@@ -613,7 +677,7 @@ document.addEventListener("DOMContentLoaded", () => {
       try { window.__lastGazeResult = teardownGazeAggregation(); } catch (e) {}
       try { window.__lastOpenSummary = analyzer.summarize(); } catch (e) {}
       await sendEyeLandmarkData({ name: participantNameRaw || null, nameSafe: participantNameSafe || null, phase: phaseLabel });
-    } catch (e) { console.warn('[Main] failed to save phase data', e); }
+    } catch (e) { console.debug('[Main] failed to save phase data', e); }
   }
 
   async function playMovie(movieId, durationSec = 300) {
@@ -624,12 +688,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
       const modal = document.createElement('div'); modal.id = modalId;
       Object.assign(modal.style, { position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20000 });
-  const box = document.createElement('div'); Object.assign(box.style, { width: '90%', maxWidth: '1400px', background: '#000', padding: '6px', borderRadius: '6px', textAlign: 'center' });
+      const box = document.createElement('div'); Object.assign(box.style, { width: '90%', maxWidth: '1400px', background: '#000', padding: '6px', borderRadius: '6px', textAlign: 'center' });
 
-  // prefer a preloaded video element if available
-  let video = window.__preloadedMovies && window.__preloadedMovies[movieId];
-      let ownVideo = false;
-  if (video && video.tagName === 'VIDEO') {
+      // prefer a preloaded video element if available
+      let video = window.__preloadedMovies && window.__preloadedMovies[movieId];
+          let ownVideo = false;
+      if (video && video.tagName === 'VIDEO') {
         // reuse preloaded element but clone to avoid muting/preload flags
         try {
           const clone = document.createElement('video');
@@ -659,7 +723,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // ensure we resolve only when playback ends (not on timeout)
       const timeoutId = setTimeout(() => {
         // fallback: if video didn't end within durationSec, we'll still clean up but do NOT auto-advance; prefer ended event
-        console.warn('[Main] playMovie fallback timeout reached for', movieId);
+        console.debug('[Main] playMovie fallback timeout reached for', movieId);
       }, durationSec*1000 + 1500);
 
       function onEnded() { clearTimeout(timeoutId); cleanup(); resolve(); }
@@ -672,173 +736,203 @@ document.addEventListener("DOMContentLoaded", () => {
     // Phase 1
     showMessage('次に10ペアの画像が表示されます。', 5);
     await new Promise(r => setTimeout(r, 6000));
-  // ensure collector and normalized series start aligned
-  window.__normalizedOpenSeries = [];
-  try { resetCollectedData(); } catch(e){}
-  // resume processing and start collecting only for image display
-  try { resumeProcessing(); startCollecting(); } catch(e){}
-  setupGazeAggregation();
-  await showImageRange(1, 10, 3000);
-  // after image block, stop collecting and pause processing to save and be lightweight
-  try { stopCollecting(); pauseProcessing(); } catch(e){}
-  await savePhaseData('1-1');
-  // hide images when block finishes and show next instruction
-  try { hideImages(); } catch(e){}
-  showMessage('続いて動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
-  await new Promise(r => setTimeout(r, 5000));
-  await playMovie('movie1-1', 300);
+    // ensure collector and normalized series start aligned
+    window.__normalizedOpenSeries = [];
+    try { resetCollectedData(); } catch(e){}
+    // resume processing and start collecting only for image display
+    try { resumeProcessing(); startCollecting(); } catch(e){}
+    setupGazeAggregation();
+    await showImageRange(1, 10, 3000);
+    // after image block, stop collecting and pause processing to save and be lightweight
+    try { stopCollecting(); pauseProcessing(); } catch(e){}
+    await savePhaseData('1-1');
+    // hide images when block finishes and show next instruction
+    try { hideImages(); } catch(e){}
+    showMessage('続いて動画を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+    await new Promise(r => setTimeout(r, 5000));
+    await playMovie('movie1', 300);
 
-    // images 1-2
-  try { showImages(); } catch(e){}
-  showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 4000));
-  window.__normalizedOpenSeries = [];
-  try { resetCollectedData(); } catch(e){}
-  try { resumeProcessing(); startCollecting(); } catch(e){}
-  // ensure images are visible for the next block
-  setupGazeAggregation();
-  await showImageRange(11, 20, 3000);
-  try { stopCollecting(); pauseProcessing(); } catch(e){}
-  await savePhaseData('1-2');
+      // images 1-2
+    try { showImages(); } catch(e){}
+    showMessage('次に10ペアの画像が表示されます。', 3);
+    await new Promise(r => setTimeout(r, 4000));
+    window.__normalizedOpenSeries = [];
+    try { resetCollectedData(); } catch(e){}
+    try { resumeProcessing(); startCollecting(); } catch(e){}
+    // ensure images are visible for the next block
+    setupGazeAggregation();
+    await showImageRange(11, 20, 3000);
+    try { stopCollecting(); pauseProcessing(); } catch(e){}
+    await savePhaseData('1-2');
     // 5 minute rest
     try { hideImages(); } catch(e){}
+    await new Promise(r => setTimeout(r, 2000));
+    // アンケート
+    await Agent.showAgent();
+    await new Promise(r => setTimeout(r, 2000));
+    try{
+      // 1回目: Valence
+      await playVoiceFile(2, 130);
+      const valence = await showSurveyQuestion('valence', 'Valence（快‐不快）', '今の気分を選んでください（1=非常に不快、9=非常に快）', '非常不快', '非常快');
+      clearBubbles();
+      
+      // 2回目: Arousal
+      await playVoiceFile(3);
+      const arousal = await showSurveyQuestion('arousal', 'Arousal（覚醒）', '今の覚醒状態（落ち着き‐興奮）を選んでください（1=とても落ち着いている、9=とても興奮/緊張している）', '落ち着き', '興奮/緊張');
+      clearBubbles();
+
+      // 3回目: anxiety
+      await playVoiceFile(4);
+      const anxiety = await showSurveyQuestion('anxiety', 'Anxiety（不安）', '今、不安はどのくらいですか？（1=まったく不安がない、9=とても不安）', 'まったく不安がない', 'とても不安');
+      clearBubbles();
+
+      await playVoiceFile(5);
+      
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'valence', value: valence, ts: Date.now() }, 'survey_valence');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'arousal', value: arousal, ts: Date.now() }, 'survey_arousal');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'anxiety', value: anxiety, ts: Date.now() }, 'survey_anxiety');
+    } catch (err) {
+      console.debug('[Main] Question flow failed', err);
+    }
     // showMessage('5分間の休憩を取ります。', 5);
     // await new Promise(r => setTimeout(r, 5000));
     // showTimer(5);
     // await new Promise(r => setTimeout(r, 5*60*1000));
     // // await new Promise(r => setTimeout(r, 3*1000));
-  showMessage('次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
-  await new Promise(r => setTimeout(r, 5000));
-  await playMovie('movie1-2', 300);
+    // showMessage('次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+    // await new Promise(r => setTimeout(r, 5000));
+    // await playMovie('movie1-2', 300);
 
-    // images 1-3
-  try { showImages(); } catch(e){}
-  showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 4000));
-  window.__normalizedOpenSeries = [];
-  try { resetCollectedData(); } catch(e){}
-  try { resumeProcessing(); startCollecting(); } catch(e){}
-  setupGazeAggregation();
-  await showImageRange(21, 30, 3000);
-  try { stopCollecting(); pauseProcessing(); } catch(e){}
-  await savePhaseData('1-3');
+      // images 1-3
+    // try { showImages(); } catch(e){}
+    // showMessage('次に10ペアの画像が表示されます。', 3);
+    // await new Promise(r => setTimeout(r, 4000));
+    // window.__normalizedOpenSeries = [];
+    // try { resetCollectedData(); } catch(e){}
+    // try { resumeProcessing(); startCollecting(); } catch(e){}
+    // setupGazeAggregation();
+    // await showImageRange(21, 30, 3000);
+    // try { stopCollecting(); pauseProcessing(); } catch(e){}
+    // await savePhaseData('1-3');
 
-    // End of Phase 1
-    try { hideImages(); } catch(e){}
-  //   showMessage('フェーズ1終了です', 5);
-  //   await new Promise(r => setTimeout(r, 5000));
-  //   // show Next button (rich style) centered over #myCanvas3
-  //   const nextBtn = document.createElement('button');
-  //   nextBtn.textContent = '次へ';
-  //   Object.assign(nextBtn.style, {
-  //     position: 'fixed',
-  //     zIndex: 16000,
-  //     padding: '12px 22px',
-  //     fontSize: '18px',
-  //     fontWeight: '700',
-  //     color: '#fff',
-  //     background: 'linear-gradient(90deg,#4b8cff,#3366ff)',
-  //     border: 'none',
-  //     borderRadius: '12px',
-  //     boxShadow: '0 8px 24px rgba(51,102,255,0.22)',
-  //     cursor: 'pointer',
-  //     transform: 'translate(-50%, -50%)',
-  //     transition: 'transform .12s ease, box-shadow .12s ease',
-  //   });
-  //   nextBtn.setAttribute('aria-label', '次へ (フェーズ2へ進む)');
-  //   document.body.appendChild(nextBtn);
+      // End of Phase 1
+    // try { hideImages(); } catch(e){}
 
-  //   const canvas3 = document.getElementById('myCanvas3');
-  //   function positionNextBtn() {
-  //     try {
-  //       if (canvas3) {
-  //         const r = canvas3.getBoundingClientRect();
-  //         const cx = r.left + r.width / 2;
-  //         const cy = r.top + r.height / 2;
-  //         nextBtn.style.left = cx + 'px';
-  //         nextBtn.style.top = cy + 'px';
-  //       } else {
-  //         nextBtn.style.left = (window.innerWidth / 2) + 'px';
-  //         nextBtn.style.top = (window.innerHeight / 2) + 'px';
-  //       }
-  //     } catch (e) {
-  //       nextBtn.style.left = '50%'; nextBtn.style.top = '50%';
-  //     }
-  //   }
-  //   positionNextBtn();
-  //   window.addEventListener('resize', positionNextBtn);
 
-  //   // when Next is pressed, make sure images are shown and canvases refresh before continuing
-  //   await new Promise(resolve => {
-  //     nextBtn.addEventListener('click', async () => {
-  //       try {
-  //         // visual press effect
-  //         nextBtn.style.transform = 'translate(-50%, -50%) scale(0.98)';  
-  //       } catch (err) {
-  //         console.warn('[Main] error during Next click preparation', err);
-  //       }
-  //       try { window.removeEventListener('resize', positionNextBtn); } catch(e){}
-  //       try { nextBtn.remove(); } catch(e){}
-  //       resolve();
-  //     }, { once: true });
-  //   });
+    //   showMessage('フェーズ1終了です', 5);
+    //   await new Promise(r => setTimeout(r, 5000));
+    //   // show Next button (rich style) centered over #myCanvas3
+    //   const nextBtn = document.createElement('button');
+    //   nextBtn.textContent = '次へ';
+    //   Object.assign(nextBtn.style, {
+    //     position: 'fixed',
+    //     zIndex: 16000,
+    //     padding: '12px 22px',
+    //     fontSize: '18px',
+    //     fontWeight: '700',
+    //     color: '#fff',
+    //     background: 'linear-gradient(90deg,#4b8cff,#3366ff)',
+    //     border: 'none',
+    //     borderRadius: '12px',
+    //     boxShadow: '0 8px 24px rgba(51,102,255,0.22)',
+    //     cursor: 'pointer',
+    //     transform: 'translate(-50%, -50%)',
+    //     transition: 'transform .12s ease, box-shadow .12s ease',
+    //   });
+    //   nextBtn.setAttribute('aria-label', '次へ (フェーズ2へ進む)');
+    //   document.body.appendChild(nextBtn);
 
-  //   // Phase 2 (mirror of Phase 1 but with movie2 IDs)
-  // try { showImages(); } catch (e) { console.warn('[Main] showImages failed on Next click', e); }
-  // // allow layout to settle
-  // await new Promise(r => requestAnimationFrame(r));
-  // await new Promise(r => setTimeout(r, 60));
-  // // refresh canvas controllers to recalc backing store
-  // try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) { console.warn('[Main] leftImg.refresh failed', e); }
-  // try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) { console.warn('[Main] rightImg.refresh failed', e); }
-  // showMessage('次に10ペアの画像が表示されます。', 3);
-  // await new Promise(r => setTimeout(r, 4000));
-  // window.__normalizedOpenSeries = [];
-  // try { resetCollectedData(); } catch(e){}
-  // try { resumeProcessing(); startCollecting(); } catch(e){}
-  // setupGazeAggregation();
-  // await showImageRange(31, 40, 3000);
-  // try { stopCollecting(); pauseProcessing(); } catch(e){}
-  // await savePhaseData('2-1');
-  // try { hideImages(); } catch(e){}
-  showMessage('続いて動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
-  await new Promise(r => setTimeout(r, 5000));
-  await playMovie('movie2-1', 300);
+    //   const canvas3 = document.getElementById('myCanvas3');
+    //   function positionNextBtn() {
+    //     try {
+    //       if (canvas3) {
+    //         const r = canvas3.getBoundingClientRect();
+    //         const cx = r.left + r.width / 2;
+    //         const cy = r.top + r.height / 2;
+    //         nextBtn.style.left = cx + 'px';
+    //         nextBtn.style.top = cy + 'px';
+    //       } else {
+    //         nextBtn.style.left = (window.innerWidth / 2) + 'px';
+    //         nextBtn.style.top = (window.innerHeight / 2) + 'px';
+    //       }
+    //     } catch (e) {
+    //       nextBtn.style.left = '50%'; nextBtn.style.top = '50%';
+    //     }
+    //   }
+    //   positionNextBtn();
+    //   window.addEventListener('resize', positionNextBtn);
 
-  try { showImages(); } catch(e){}
-  showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 4000));
-  window.__normalizedOpenSeries = [];
-  try { resetCollectedData(); } catch(e){}
-  try { resumeProcessing(); startCollecting(); } catch(e){}
-  setupGazeAggregation();
-  await showImageRange(41, 50, 3000);
-  try { stopCollecting(); pauseProcessing(); } catch(e){}
-  await savePhaseData('2-2');
+    //   // when Next is pressed, make sure images are shown and canvases refresh before continuing
+    //   await new Promise(resolve => {
+    //     nextBtn.addEventListener('click', async () => {
+    //       try {
+    //         // visual press effect
+    //         nextBtn.style.transform = 'translate(-50%, -50%) scale(0.98)';  
+    //       } catch (err) {
+    //         console.debug('[Main] error during Next click preparation', err);
+    //       }
+    //       try { window.removeEventListener('resize', positionNextBtn); } catch(e){}
+    //       try { nextBtn.remove(); } catch(e){}
+    //       resolve();
+    //     }, { once: true });
+    //   });
 
-  try { hideImages(); } catch(e){}
-  // showMessage('5分間の休憩を取ります。', 5);
-  //   await new Promise(r => setTimeout(r, 5000));
-  //   showTimer(5);
-  //   await new Promise(r => setTimeout(r, 5*60*1000));
-    // await new Promise(r => setTimeout(r, 3*1000));
-  showMessage('次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
-  await new Promise(r => setTimeout(r, 5000));
-  await playMovie('movie2-2', 300);
-  
-  try { showImages(); } catch(e){}
-  showMessage('次に10ペアの画像が表示されます。', 3);
-  await new Promise(r => setTimeout(r, 4000));
-  window.__normalizedOpenSeries = [];
-  try { resetCollectedData(); } catch(e){}
-  try { resumeProcessing(); startCollecting(); } catch(e){}
-  setupGazeAggregation();
-  await showImageRange(51, 60, 3000);
-  try { stopCollecting(); pauseProcessing(); } catch(e){}
-  await savePhaseData('2-3');
+    //   // Phase 2 (mirror of Phase 1 but with movie2 IDs)
+    // try { showImages(); } catch (e) { console.debug('[Main] showImages failed on Next click', e); }
+    // // allow layout to settle
+    // await new Promise(r => requestAnimationFrame(r));
+    // await new Promise(r => setTimeout(r, 60));
+    // // refresh canvas controllers to recalc backing store
+    // try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) { console.debug('[Main] leftImg.refresh failed', e); }
+    // try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) { console.debug('[Main] rightImg.refresh failed', e); }
+    // showMessage('次に10ペアの画像が表示されます。', 3);
+    // await new Promise(r => setTimeout(r, 4000));
+    // window.__normalizedOpenSeries = [];
+    // try { resetCollectedData(); } catch(e){}
+    // try { resumeProcessing(); startCollecting(); } catch(e){}
+    // setupGazeAggregation();
+    // await showImageRange(31, 40, 3000);
+    // try { stopCollecting(); pauseProcessing(); } catch(e){}
+    // await savePhaseData('2-1');
+    // try { hideImages(); } catch(e){}
+    // showMessage('続いて動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+    // await new Promise(r => setTimeout(r, 5000));
+    // await playMovie('movie2-1', 300);
 
-    try { hideImages(); } catch(e){}
-    showMessage('実験が終了しました。ご協力ありがとうございました。', 5);
+    // try { showImages(); } catch(e){}
+    // showMessage('次に10ペアの画像が表示されます。', 3);
+    // await new Promise(r => setTimeout(r, 4000));
+    // window.__normalizedOpenSeries = [];
+    // try { resetCollectedData(); } catch(e){}
+    // try { resumeProcessing(); startCollecting(); } catch(e){}
+    // setupGazeAggregation();
+    // await showImageRange(41, 50, 3000);
+    // try { stopCollecting(); pauseProcessing(); } catch(e){}
+    // await savePhaseData('2-2');
+
+    // try { hideImages(); } catch(e){}
+    // showMessage('5分間の休憩を取ります。', 5);
+    //   await new Promise(r => setTimeout(r, 5000));
+    //   showTimer(5);
+    //   await new Promise(r => setTimeout(r, 5*60*1000));
+      // await new Promise(r => setTimeout(r, 3*1000));
+    // showMessage('次に動画（5分）を再生します。動画が再生されるまで時間がかかる場合があります。', 5);
+    // await new Promise(r => setTimeout(r, 5000));
+    // await playMovie('movie2-2', 300);
+    
+    // try { showImages(); } catch(e){}
+    // showMessage('次に10ペアの画像が表示されます。', 3);
+    // await new Promise(r => setTimeout(r, 4000));
+    // window.__normalizedOpenSeries = [];
+    // try { resetCollectedData(); } catch(e){}
+    // try { resumeProcessing(); startCollecting(); } catch(e){}
+    // setupGazeAggregation();
+    // await showImageRange(51, 60, 3000);
+    // try { stopCollecting(); pauseProcessing(); } catch(e){}
+    // await savePhaseData('2-3');
+
+    // try { hideImages(); } catch(e){}
+    // showMessage('実験が終了しました。ご協力ありがとうございました。', 5);
   }
   if (btnToggle) {
     btnToggle.addEventListener("click", async () => {
@@ -900,7 +994,7 @@ document.addEventListener("DOMContentLoaded", () => {
           norm: Number((norm || 0).toFixed(4))
         });
       } catch (e) {
-        console.warn('[Main] failed to push normalized open series', e);
+        console.debug('[Main] failed to push normalized open series', e);
       }
     }
 
@@ -981,14 +1075,14 @@ function renderFinalResults(panel, gazeRes) {
     onGazeIn = (ev) => {
       const ux = ev?.detail?.ux;
       if (typeof ux !== "number") return;
-      if (!gazeCounts) { console.warn('[Main] onGazeIn called but gazeCounts is null'); return; }
+      if (!gazeCounts) { console.debug('[Main] onGazeIn called but gazeCounts is null'); return; }
       if (ux < 0.5) gazeCounts.left += 1;
       else          gazeCounts.right += 1;
       gazeCounts.totalIn += 1;
       // console.debug("[Gaze] in ux=", ux.toFixed(3));
     };
     onGazeOOB = () => {
-      if (!gazeCounts) { console.warn('[Main] onGazeOOB called but gazeCounts is null'); return; }
+      if (!gazeCounts) { console.debug('[Main] onGazeOOB called but gazeCounts is null'); return; }
       gazeCounts.oob += 1;
       // console.debug("[Gaze] out-of-bounds");
     };
@@ -1038,5 +1132,135 @@ function renderFinalResults(panel, gazeRes) {
   }
 
 
-  
+  // アンケート表示（agentOverlay 内，agentOverlayContainer の横・agentOverlayChat の下に表示）
+  // id: 任意の識別子, title: 見出し, prompt: 質問文, leftLabel/rightLabel: スライダー端ラベル
+  function showSurveyQuestion(id, title, prompt, leftLabel, rightLabel) {
+    return new Promise((resolve) => {
+      try {
+        const overlay = document.getElementById('agentOverlay');
+        if (!overlay) { resolve(null); return; }
+
+        // remove existing survey
+        const prev = document.getElementById('agentSurveyWrapper');
+        if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+
+        const chat = overlay.querySelector('#agentOverlayChat');
+        const container = overlay.querySelector('#agentOverlayContainer');
+
+        const wrapper = document.createElement('div');
+        wrapper.id = 'agentSurveyWrapper';
+        wrapper.style.position = 'absolute';
+        wrapper.style.zIndex = 20200;
+        wrapper.style.pointerEvents = 'auto';
+        wrapper.style.background = 'rgba(255,255,255,0.95)';
+        wrapper.style.color = '#111';
+        wrapper.style.borderRadius = '10px';
+        wrapper.style.padding = '12px';
+        wrapper.style.boxShadow = '0 8px 30px rgba(0,0,0,0.25)';
+        wrapper.style.minWidth = '260px';
+        wrapper.style.maxWidth = '42vw';
+        wrapper.style.fontFamily = 'sans-serif';
+
+        // position: prefer under chat, otherwise to the right of container
+        const place = () => {
+          let left = null, top = null;
+          if (chat) {
+            const r = chat.getBoundingClientRect();
+            left = r.left + window.scrollX;
+            top = r.bottom + window.scrollY + 8;
+            // ensure it doesn't overflow right edge
+            if (left + wrapper.offsetWidth > window.innerWidth - 8) {
+              left = window.innerWidth - wrapper.offsetWidth - 8;
+            }
+          } else if (container) {
+            const rc = container.getBoundingClientRect();
+            left = rc.right + window.scrollX + 12;
+            top = (rc.top + rc.height/2) + window.scrollY - wrapper.offsetHeight/2;
+            if (left + wrapper.offsetWidth > window.innerWidth - 8) left = window.innerWidth - wrapper.offsetWidth - 8;
+          } else {
+            left = Math.max(8, window.innerWidth - wrapper.offsetWidth - (window.innerWidth * 0.06));
+            top = window.innerHeight/2 - wrapper.offsetHeight/2 + window.scrollY;
+          }
+          wrapper.style.left = (left !== null ? `${left}px` : 'auto');
+          wrapper.style.top  = (top  !== null ? `${top}px`  : '50%');
+        };
+
+        wrapper.innerHTML = `
+          <div style="font-weight:700; margin-bottom:6px; font-size:16px;">${title}</div>
+          <div style="font-size:14px; margin-bottom:8px; white-space:pre-wrap;">${prompt}</div>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <span style="font-size:12px; width:48px; text-align:left;">${leftLabel}</span>
+            <input id="agentSurveyRange" type="range" min="1" max="9" step="1" value="5" style="flex:1;">
+            <span style="font-size:12px; width:48px; text-align:right;">${rightLabel}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <small id="agentSurveyValue" style="opacity:.85">選択値: 5</small>
+            <button id="agentSurveySubmit" style="padding:8px 12px; background:#3366ff; color:#fff; border:none; border-radius:8px; cursor:pointer;">送信</button>
+          </div>
+        `;
+        overlay.appendChild(wrapper);
+
+        // ensure layout computed before placing
+        requestAnimationFrame(() => {
+          place();
+        });
+
+        const range = wrapper.querySelector('#agentSurveyRange');
+        const valEl = wrapper.querySelector('#agentSurveyValue');
+        const submit = wrapper.querySelector('#agentSurveySubmit');
+
+        const onChange = () => { valEl.textContent = `選択値: ${range.value}`; };
+        range.addEventListener('input', onChange);
+
+        const cleanup = (v) => {
+          try { range.removeEventListener('input', onChange); } catch(e){}
+          try { if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper); } catch(e){}
+          resolve(Number(v));
+        };
+
+        submit.addEventListener('click', () => cleanup(range.value), { once: true });
+
+        // allow Enter key on wrapper to submit
+        wrapper.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); cleanup(range.value); }
+        });
+
+        // focus for keyboard
+        range.focus();
+        // reposition on resize/scroll
+        const onWin = () => { try { place(); } catch(e){} };
+        window.addEventListener('resize', onWin);
+        window.addEventListener('scroll', onWin);
+        // remove listeners when resolved
+        const originalResolve = resolve;
+        resolve = (v) => {
+          window.removeEventListener('resize', onWin);
+          window.removeEventListener('scroll', onWin);
+          originalResolve(v);
+        };
+      } catch (e) {
+        console.debug('[Main] showSurveyQuestion failed', e);
+        resolve(null);
+      }
+    });
+  }
+
+  // アンケート結果をローカルに保存（他の Gaze と同様の命名規則）
+  function saveSurveyResults(obj, tag = 'survey') {
+    try {
+      const base = participantNameSafe || 'participant';
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${base}_${tag}_${ts}.json`;
+      const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { URL.revokeObjectURL(a.href); if (a.parentNode) a.parentNode.removeChild(a); } catch(e){} }, 1000);
+      console.debug('[Main] saved survey file', filename);
+    } catch (e) {
+      console.debug('[Main] saveSurveyResults failed', e);
+    }
+  }
 });

@@ -25,29 +25,39 @@ let rafId = null;
 let stream = null;
 
 export async function mediapipeInitAndStart() {
+  console.debug("[MediaPipe] Initializing and starting MediaPipe face landmarking");
+  // releaseAllAgentWebGLContexts(); // 古いコンテキストを破棄
+  // await new Promise((resolve) => setTimeout(resolve, 250)); // 少し待つ
   // 既存ストリームが止まっていたら再準備
-  await setupCamera();
-  await initFaceLandmarker();
+  try{
+    await setupCamera();
+    await initFaceLandmarker();
+    console.debug("[MediaPipe] Camera and FaceLandmarker initialized");
 
-  // 初回ウォームアップ
-  if (faceLandmarker && videoEl?.readyState >= 2) {
-    faceLandmarker.detectForVideo(videoEl, Date.now());
+    // 初回ウォームアップ
+    if (faceLandmarker && videoEl?.readyState >= 2) {
+      faceLandmarker.detectForVideo(videoEl, Date.now());
+    }
+    console.debug("[MediaPipe] Initial warmup done");
+    // フラグ類
+    // reset split storage
+    collectedMeta = { startedAt: performance.now() };
+    collectedEyeFrames = [];
+    collectedGazeFrames = [];
+    // collectedOpenRatios intentionally left null
+    // compatibility: provide an alias array for collectedData that mirrors eyeFrames
+    collectedData = collectedEyeFrames;
+    startTime = performance.now();
+    collecting = true;
+    running = true;
+
+    // ループ開始
+    loop();
+  } catch (e) {
+    console.error("[MediaPipe] mediapipeInitAndStart failed", e);
+    throw e;
   }
-
-  // フラグ類
-  // reset split storage
-  collectedMeta = { startedAt: performance.now() };
-  collectedEyeFrames = [];
-  collectedGazeFrames = [];
-  // collectedOpenRatios intentionally left null
-  // compatibility: provide an alias array for collectedData that mirrors eyeFrames
-  collectedData = collectedEyeFrames;
-  startTime = performance.now();
-  collecting = true;
-  running = true;
-
-  // ループ開始
-  loop();
+  console.debug("[MediaPipe] MediaPipe face landmarking started");
 }
 
 // allow main.js to align collection timing with normalizedOpenSeries start

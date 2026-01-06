@@ -97,6 +97,7 @@ export async function playTextAsAudio(text) {
 // VAD-based recording is provided by recordVAD (see bottom of file for export)
 
 export async function chatTextToText(instruction = '', text) {
+  console.debug('[interactions] chatTextToText start', { instruction, textLength: (text||'').length });
   const resp = await fetch(CHAT_COMPLETION_ENDPOINT, 
     { method: 'POST', 
       headers: { 'Content-Type': 'application/json' }, 
@@ -110,6 +111,55 @@ export async function chatTextToText(instruction = '', text) {
   // if (data?.text) addBubble(data.text);
   console.debug('[interactions] chatTextToText response', data);
   return data;
+}
+
+// Text -> (browser) audio: call chat completion to get text, then speak locally (no server TTS)
+export async function chatTextToAudio(instruction = '', text) {
+  console.debug('[interactions] chatTextToAudio start', { instruction, textLength: (text||'').length });
+  const data = await chatTextToText(instruction, text);
+
+  // Attempt to extract transcript and any base64 audio from the chat completion "raw" field.
+  let transcript = null;
+  let audioBase64 = null;
+  try {
+    const raw = data?.raw;
+    if (raw && typeof raw === 'object') {
+      const choice = raw.choices?.[0];
+      const msg = choice?.message;
+      if (msg?.audio?.transcript) transcript = msg.audio.transcript;
+      else if (msg?.transcript) transcript = msg.transcript;
+      if (msg?.audio?.data) audioBase64 = msg.audio.data;
+    } else if (raw && typeof raw === 'string') {
+      // Example raw string contains "audio=ChatCompletionAudio(..., data='BASE64...', ..., transcript='...')"
+      const tmatch = raw.match(/transcript=['"]([^'"]+)['"]/s);
+      if (tmatch) transcript = tmatch[1];
+      const amatch = raw.match(/data=['"]([A-Za-z0-9+/=]+)['"]/s);
+      if (amatch) audioBase64 = amatch[1];
+    }
+  } catch (e) {
+    console.debug('[interactions] transcript/audio extraction error', e);
+  }
+
+  // fallback to returned text if transcript not present
+  if (!transcript) transcript = (data && data.text) ? String(data.text).trim() : '';
+
+  // If we found base64 audio data, decode and play it via playAudioBlob
+  if (audioBase64) {
+    try {
+      const binaryString = atob(audioBase64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+      const blob = new Blob([bytes.buffer], { type: 'audio/wav' });
+      await playAudioBlob(blob);
+      if (transcript) addBubble(transcript);
+      return { ...data, transcript };
+    } catch (e) {
+      console.error('[interactions] failed to decode/play base64 audio', e);
+    }
+  }
+  // Ultimately return data with transcript (may be empty)
+  return { ...data, transcript };
 }
 
 /**
@@ -320,13 +370,221 @@ export async function requestResponse() {
 }
 
 export function addBubble(text, isUser = false) {
-  const chatContainer = document.getElementById("chatContainer");
+  console.debug('[addBubble] called', { textPreview: (typeof text === 'string' ? text.slice(0,80) : String(text)), isUser });
+
+  // まず既存のグローバル chatContainer を取得（フォールバックあり）
+  const defaultChat = document.getElementById("chatContainer");
+
+  // エージェントオーバーレイが存在すれば、その中の右側に表示する専用コンテナを使う
+  const overlay = document.getElementById('agentOverlay');
+  console.debug('[addBubble] overlayPresent:', !!overlay, 'defaultChatPresent:', !!defaultChat);
+  let targetContainer = defaultChat;
+
+  if (overlay) {
+    // ensure overlay has a positioning context for absolute child
+    try { if (!overlay.style.position) overlay.style.position = 'fixed'; } catch(e){}
+
+    let aChat = overlay.querySelector('#agentOverlayChat');
+    if (!aChat) {
+      aChat = document.createElement('div');
+      aChat.id = 'agentOverlayChat';
+      Object.assign(aChat.style, {
+        position: 'absolute',
+        left: '0',
+        right: 'auto',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        minWidth: '200px',
+        maxWidth: '45vw',
+        width: 'auto',
+        pointerEvents: 'auto',
+        zIndex: 20100,
+        color: '#fff',
+        alignItems: 'flex-start',
+        /* make bubbles readable even if global styles missing */
+        background: 'transparent',
+        padding: '4px'
+      });
+      overlay.appendChild(aChat);
+      console.debug('[addBubble] created agentOverlayChat');
+    }
+    targetContainer = aChat;
+  } else if (!targetContainer) {
+    // 最終フォールバック: 新規 chatContainer を body に作る
+    const c = document.createElement('div');
+    c.id = 'chatContainer';
+    Object.assign(c.style, {
+      position: 'fixed', right: '20px', bottom: '20px', maxWidth: '320px', zIndex: 10000,
+      display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px'
+    });
+    document.body.appendChild(c);
+    targetContainer = c;
+    console.debug('[addBubble] created fallback chatContainer');
+  }
+
   const div = document.createElement("div");
   div.className = isUser ? "bubble bubble-user" : "bubble bubble-ai";
-  // div.textContent = text;
   div.innerHTML = text.replace(/\n/g, "<br>");
-  chatContainer.appendChild(div);
-  chatContainer.scrollTop = chatContainer.scrollHeight;
+  // ensure bubble is visible even without CSS by applying minimal inline styles
+  Object.assign(div.style, {
+    background: isUser ? 'rgba(50,120,230,0.95)' : 'rgba(0,0,0,0.6)',
+    color: '#fff',
+    padding: '10px 14px',
+    borderRadius: '14px',
+    maxWidth: 'none',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+    wordBreak: 'break-word',
+    fontSize: '14px',
+    textAlign: 'left',
+    alignSelf: 'flex-start'
+  });
+  // keep user bubbles visually distinct but left-aligned
+  if (isUser) Object.assign(div.style, { background: 'linear-gradient(180deg,#4b9dff,#2b6fd6)' });
+
+  targetContainer.appendChild(div);
+  console.debug('[addBubble] appended to', targetContainer.id || targetContainer);
+  if (defaultChat && targetContainer === defaultChat) {
+    defaultChat.scrollTop = defaultChat.scrollHeight;
+  }
+}
+
+// addBubbleTyped: type text into a bubble character-by-character
+// returns a Promise that resolves when typing completes
+export function addBubbleTyped(text, isUser = false, charInterval = 40) {
+  return new Promise((resolve) => {
+    try {
+      // reuse target container resolution logic from addBubble
+      const defaultChat = document.getElementById("chatContainer");
+      let overlay = document.getElementById('agentOverlay');
+      let targetContainer = defaultChat;
+
+      if (overlay) {
+        try { if (!overlay.style.position) overlay.style.position = 'fixed'; } catch(e){}
+        let aChat = overlay.querySelector('#agentOverlayChat');
+        if (!aChat) {
+          aChat = document.createElement('div');
+          aChat.id = 'agentOverlayChat';
+          Object.assign(aChat.style, {
+            position: 'absolute', left: '50%', right: 'auto', top: '40%', transform: 'translateY(-50%)',
+            display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '200px', maxWidth: '45vw', width: 'auto',
+            pointerEvents: 'auto', zIndex: 20100, color: '#fff', alignItems: 'flex-start', background: 'transparent', padding: '4px'
+          });
+          overlay.appendChild(aChat);
+        }
+        targetContainer = aChat;
+      } else if (!targetContainer) {
+        const c = document.createElement('div');
+        c.id = 'chatContainer';
+        Object.assign(c.style, { position: 'fixed', right: '20px', bottom: '20px', maxWidth: '320px', zIndex: 10000, display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px' });
+        document.body.appendChild(c);
+        targetContainer = c;
+      }
+
+      const div = document.createElement("div");
+      div.className = isUser ? "bubble bubble-user" : "bubble bubble-ai";
+      // start empty, append as we type
+      div.innerHTML = "";
+      Object.assign(div.style, {
+        background: isUser ? 'rgba(50,120,230,0.95)' : 'rgba(0,0,0,0.6)',
+        color: '#fff', padding: '10px 14px', borderRadius: '14px', maxWidth: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.35)', wordBreak: 'break-word', fontSize: '14px',
+        textAlign: 'left', alignSelf: 'flex-start'
+      });
+      if (isUser) Object.assign(div.style, { background: 'linear-gradient(180deg,#4b9dff,#2b6fd6)' });
+
+      targetContainer.appendChild(div);
+
+      let i = 0;
+      let stopped = false;
+      const raw = String(text || '');
+
+      const finish = () => {
+        if (stopped) return;
+        stopped = true;
+        // set full text (convert newlines to <br>)
+        div.innerHTML = raw.replace(/\n/g, '<br>');
+        resolve();
+      };
+
+      // click to skip typing and show full text
+      const onClick = () => { finish(); try { div.removeEventListener('click', onClick); } catch(e){} };
+      div.addEventListener('click', onClick);
+
+      const timer = setInterval(() => {
+        if (stopped) { clearInterval(timer); return; }
+        i++;
+        const partial = raw.slice(0, i);
+        div.innerHTML = partial.replace(/\n/g, '<br>');
+        // if finished
+        if (i >= raw.length) {
+          clearInterval(timer);
+          try { div.removeEventListener('click', onClick); } catch(e){}
+          stopped = true;
+          resolve();
+        }
+      }, Math.max(8, Number(charInterval) || 40));
+
+      // safety: if element removed externally, stop
+      const mo = new MutationObserver(() => {
+        if (!div.isConnected) {
+          try { clearInterval(timer); } catch(e){}
+          try { mo.disconnect(); } catch(e){}
+          if (!stopped) resolve();
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+
+    } catch (e) {
+      console.debug('[addBubbleTyped] failed', e);
+      resolve();
+    }
+  });
+}
+
+// clear bubbles added by `addBubble`
+// mode: 'agent' (default) clears only agent overlay chat;
+//       'all' clears both overlay chat and global chatContainer;
+//       'user' clears only user bubbles; 'ai' clears only ai bubbles in both places.
+export function clearBubbles(mode = 'agent') {
+  console.debug('[clearBubbles] mode', mode);
+  try {
+    const overlayChat = document.getElementById('agentOverlayChat');
+    const chat = document.getElementById('chatContainer');
+
+    const removeBySelector = (root, selector) => {
+      if (!root) return;
+      root.querySelectorAll(selector).forEach(n => { try { n.remove(); } catch(e){} });
+    };
+
+    if (mode === 'agent' || mode === 'all') {
+      if (overlayChat) overlayChat.innerHTML = '';
+      if (mode === 'agent') return;
+    }
+
+    if (mode === 'all') {
+      if (chat) chat.innerHTML = '';
+      return;
+    }
+
+    if (mode === 'user') {
+      if (overlayChat) removeBySelector(overlayChat, '.bubble-user');
+      if (chat) removeBySelector(chat, '.bubble-user');
+      return;
+    }
+
+    if (mode === 'ai') {
+      if (overlayChat) removeBySelector(overlayChat, '.bubble-ai');
+      if (chat) removeBySelector(chat, '.bubble-ai');
+      return;
+    }
+
+    // fallback: if no mode matched, clear overlay if exists
+    if (overlayChat) overlayChat.innerHTML = '';
+  } catch (e) {
+    console.warn('[clearBubbles] failed', e);
+  }
 }
 
 export async function restoreConversationHistory(state) {
