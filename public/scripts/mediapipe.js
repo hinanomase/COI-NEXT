@@ -137,6 +137,10 @@ export async function sendEyeLandmarkData(options = {}) {
      // eye frames
     // ensure meta contains group
     try { if (!collectedMeta) collectedMeta = {}; collectedMeta.group = group || null; } catch(e){}
+    // include participant metadata if available on window
+    try { if (!collectedMeta) collectedMeta = {}; collectedMeta.participantGender = (typeof window !== 'undefined' && window.__participantGender) ? window.__participantGender : null; } catch(e){}
+    try { if (!collectedMeta) collectedMeta = {}; collectedMeta.participantAge = (typeof window !== 'undefined' && window.__participantAge) ? window.__participantAge : null; } catch(e){}
+    try { if (!collectedMeta) collectedMeta = {}; collectedMeta.participantConsent = (typeof window !== 'undefined' && window.__participantConsent) ? window.__participantConsent : null; } catch(e){}
      const eyeBlob = new Blob([JSON.stringify(collectedEyeFrames, null, 2)], { type: 'application/json' });
      downloadBlob(eyeBlob, `${baseName}_eyeFrames.json`);
      // gaze frames
@@ -158,6 +162,10 @@ export async function sendEyeLandmarkData(options = {}) {
       const gazeSummary = window.__lastGazeResult || null;
       // compose enriched meta: include canvas bounding rects and calibration/coef information if available
       const meta = Object.assign({}, collectedMeta || {});
+      // also ensure final meta contains participant gender/age if available globally
+      try { meta.participantGender = meta.participantGender || ((typeof window !== 'undefined' && window.__participantGender) ? window.__participantGender : null); } catch(e){}
+      try { meta.participantAge = meta.participantAge || ((typeof window !== 'undefined' && window.__participantAge) ? window.__participantAge : null); } catch(e){}
+      try { meta.participantConsent = meta.participantConsent || ((typeof window !== 'undefined' && window.__participantConsent) ? window.__participantConsent : null); } catch(e){}
   // add participant name/phase if provided
   if (name) meta.participant = name;
   if (phase) meta.phase = phase;

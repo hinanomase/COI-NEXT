@@ -406,7 +406,8 @@ export function addBubble(text, isUser = false) {
         alignItems: 'flex-start',
         /* make bubbles readable even if global styles missing */
         background: 'transparent',
-        padding: '4px'
+        padding: '4px',
+        fontSize: '20px'
       });
       overlay.appendChild(aChat);
       console.debug('[addBubble] created agentOverlayChat');
@@ -418,7 +419,7 @@ export function addBubble(text, isUser = false) {
     c.id = 'chatContainer';
     Object.assign(c.style, {
       position: 'fixed', right: '20px', bottom: '20px', maxWidth: '320px', zIndex: 10000,
-      display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px'
+      display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', fontSize: '20px'
     });
     document.body.appendChild(c);
     targetContainer = c;
@@ -437,7 +438,7 @@ export function addBubble(text, isUser = false) {
     maxWidth: 'none',
     boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
     wordBreak: 'break-word',
-    fontSize: '14px',
+    fontSize: '20px',
     textAlign: 'left',
     alignSelf: 'flex-start'
   });
@@ -470,7 +471,7 @@ export function addBubbleTyped(text, isUser = false, charInterval = 40) {
           Object.assign(aChat.style, {
             position: 'absolute', left: '50%', right: 'auto', top: '40%', transform: 'translateY(-50%)',
             display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '200px', maxWidth: '45vw', width: 'auto',
-            pointerEvents: 'auto', zIndex: 20100, color: '#fff', alignItems: 'flex-start', background: 'transparent', padding: '4px'
+            pointerEvents: 'auto', zIndex: 20100, color: '#fff', alignItems: 'flex-start', background: 'transparent', padding: '4px', fontSize: '20px'
           });
           overlay.appendChild(aChat);
         }
@@ -489,7 +490,7 @@ export function addBubbleTyped(text, isUser = false, charInterval = 40) {
       div.innerHTML = "";
       Object.assign(div.style, {
         background: isUser ? 'rgba(50,120,230,0.95)' : 'rgba(0,0,0,0.6)',
-        color: '#fff', padding: '10px 14px', borderRadius: '14px', maxWidth: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.35)', wordBreak: 'break-word', fontSize: '14px',
+        color: '#fff', padding: '10px 14px', borderRadius: '14px', maxWidth: 'none', boxShadow: '0 6px 18px rgba(0,0,0,0.35)', wordBreak: 'break-word', fontSize: '18px',
         textAlign: 'left', alignSelf: 'flex-start'
       });
       if (isUser) Object.assign(div.style, { background: 'linear-gradient(180deg,#4b9dff,#2b6fd6)' });

@@ -41,6 +41,32 @@ document.addEventListener("DOMContentLoaded", () => {
     window.__participantGroup = participantGroup;
     window.__participantGroupLabel = (participantGroup === 'movie1') ? 'horror' : (participantGroup === 'movie2') ? 'calm' : participantGroup;
     console.debug('[Main] participantGroup:', window.__participantGroup, window.__participantGroupLabel);
+    // Ensure participant has given consent; use sessionStorage for transient consent (cleared on reload)
+    try {
+      const sess = sessionStorage.getItem('participantConsentSession');
+      if (sess) {
+        try { window.__participantConsent = JSON.parse(sess); } catch(e) { window.__participantConsent = { agreed: true, ts: Date.now() }; }
+        try { sessionStorage.removeItem('participantConsentSession'); } catch(e){}
+      } else {
+        const raw = localStorage.getItem('participantConsent');
+        if (raw) {
+          try { window.__participantConsent = JSON.parse(raw); } catch(e) { window.__participantConsent = { agreed: true, ts: Date.now() }; }
+          // remove from localStorage so consent does not persist after arriving at index
+          try { localStorage.removeItem('participantConsent'); } catch(e){}
+        } else {
+          // redirect to consent page before proceeding, include current URL so we can return with query params
+          try {
+            const next = encodeURIComponent(window.location.href || './index.html');
+            window.location.href = `./consent.html?next=${next}`;
+          } catch(e) {
+            window.location.href = './consent.html';
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      window.__participantConsent = null;
+    }
     // helper: decide which movie id to play based on parsed group
     function getMovieForParticipant() {
       try {
@@ -58,9 +84,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const appContainer = document.getElementById("app");
   const dividerToggle = document.getElementById("dividerToggle");
 
-  const btnToggle =
-    document.getElementById("btnToggle") ||
-    document.getElementById("btnToggleStartStop");
+  // const btnToggle =
+  //   document.getElementById("btnToggle") ||
+  //   document.getElementById("btnToggleStartStop");
   const btnStart = document.getElementById("btnStart");
   const btnStop = document.getElementById("btnStop");
 
@@ -87,9 +113,9 @@ document.addEventListener("DOMContentLoaded", () => {
     modal.id = 'nameModal';
     Object.assign(modal.style, { position: 'fixed', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', zIndex: 20000 });
     const box = document.createElement('div');
-    Object.assign(box.style, { background: '#fff', padding: '18px', borderRadius: '8px', minWidth: '320px', textAlign: 'center' });
-    const title = document.createElement('div'); title.textContent = '参加者情報'; title.style.fontWeight = '700'; title.style.marginBottom = '8px'; title.style.color = 'black';
-    const desc = document.createElement('div'); desc.textContent = '名前を入力してください'; desc.style.marginBottom = '10px'; desc.style.color = 'black';
+    Object.assign(box.style, { background: '#fff', padding: '18px', borderRadius: '8px', minWidth: '360px', textAlign: 'center', fontSize: '15px' });
+    const title = document.createElement('div'); title.textContent = '参加者情報'; title.style.fontWeight = '700'; title.style.marginBottom = '8px'; title.style.color = 'black'; title.style.fontSize = '25px';
+    const desc = document.createElement('div'); desc.textContent = '以下の情報を入力してください（必須）'; desc.style.marginBottom = '10px'; desc.style.color = 'black'; desc.style.fontSize = '15px';
     const input = document.createElement('input');
     input.type = 'text';
     input.id = 'participantName';
@@ -99,16 +125,59 @@ document.addEventListener("DOMContentLoaded", () => {
     input.style.width = '100%';
     input.style.padding = '8px';
     input.style.marginBottom = '10px';
-    const btn = document.createElement('button'); btn.textContent = '開始'; btn.style.padding = '8px 12px'; btn.style.cursor = 'pointer';
-    box.appendChild(title); box.appendChild(desc); box.appendChild(input); box.appendChild(btn);
+    input.style.fontSize = '20px';
+
+    // Gender select (include '回答しない')
+    const genderWrap = document.createElement('div'); genderWrap.style.marginBottom = '10px'; genderWrap.style.textAlign = 'left';
+    const genderLabel = document.createElement('label'); genderLabel.textContent = '性別（必須）'; genderLabel.style.display = 'block'; genderLabel.style.fontSize = '15px'; genderLabel.style.marginBottom = '6px'; genderLabel.style.color = 'black';
+    const genderSelect = document.createElement('select'); genderSelect.id = 'participantGender'; genderSelect.style.width = '100%'; genderSelect.style.padding = '8px'; genderSelect.style.fontSize = '20px';
+    genderSelect.innerHTML = `<option value="">選択してください</option><option value="male">男性</option><option value="female">女性</option><option value="other">その他</option><option value="no_answer">回答しない</option>`;
+    genderWrap.appendChild(genderLabel); genderWrap.appendChild(genderSelect);
+
+    // Age select (list to choose from)
+    const ageWrap = document.createElement('div'); ageWrap.style.marginBottom = '12px'; ageWrap.style.textAlign = 'left';
+    const ageLabel = document.createElement('label'); ageLabel.textContent = '年齢（必須）'; ageLabel.style.display = 'block'; ageLabel.style.fontSize = '15px'; ageLabel.style.marginBottom = '6px'; ageLabel.style.color = 'black';
+    const ageSelect = document.createElement('select'); ageSelect.id = 'participantAge'; ageSelect.style.width = '100%'; ageSelect.style.padding = '8px'; ageSelect.style.fontSize = '20px';
+    // build per-year options (6歳〜99歳) and a 100歳以上 option
+    let ageOptions = '<option value="">選択してください</option>';
+    for (let y = 6; y <= 99; y++) {
+      ageOptions += `<option value="${y}">${y}歳</option>`;
+    }
+    ageOptions += '<option value="100plus">100歳以上</option>';
+    ageSelect.innerHTML = ageOptions;
+    ageWrap.appendChild(ageLabel); ageWrap.appendChild(ageSelect);
+
+    const btn = document.createElement('button'); btn.textContent = '開始'; btn.style.padding = '10px 14px'; btn.style.cursor = 'pointer'; btn.disabled = true; btn.style.opacity = '0.6'; btn.style.fontSize = '20px';
+    const note = document.createElement('div'); note.style.fontSize = '12px'; note.style.color = '#666'; note.style.marginTop = '6px'; note.textContent = 'すべて必須項目です';
+
+    box.appendChild(title); box.appendChild(desc); box.appendChild(input); box.appendChild(genderWrap); box.appendChild(ageWrap); box.appendChild(btn); box.appendChild(note);
     modal.appendChild(box);
     document.body.appendChild(modal);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+    function validateModal() {
+      const nameOk = (input.value || '').trim().length > 0;
+      const genderOk = (genderSelect.value || '') !== '';
+      const ageOk = (ageSelect.value || '') !== '';
+      const ok = nameOk && genderOk && ageOk;
+      btn.disabled = !ok;
+      btn.style.opacity = ok ? '1' : '0.6';
+      return ok;
+    }
+
+    input.addEventListener('input', () => { input.style.border = ''; validateModal(); });
+    genderSelect.addEventListener('change', () => validateModal());
+    ageSelect.addEventListener('change', () => validateModal());
+
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { if (validateModal()) btn.click(); } });
     btn.addEventListener('click', () => {
       const v = (input.value || '').trim();
       if (!v) { input.style.border = '1px solid #f44'; return; }
+      if (!validateModal()) return;
       participantNameRaw = v;
+      const g = genderSelect.value || null;
+      const a = ageSelect.value || null;
       try { participantNameSafe = encodeURIComponent(participantNameRaw); } catch(e) { participantNameSafe = participantNameRaw.replace(/[/\\]/g,'_'); }
+      // expose selected gender/age globally for saving
+      try { window.__participantGender = g; window.__participantAge = a; } catch(e){}
       modal.remove();
       // show the agent overlay after name entry and wait until it's hidden before proceeding
       (async () => {
@@ -121,7 +190,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // await ttsSpeak(
             //   "少し明るめで淡々と説明するように", 
             //   `はじめまして、${participantNameRaw}さん。これから実験を始めます。よろしくお願いします。
-            //   まずは視線の計測から始めます。顔を動かさないように画面の青い点を目で追ってください。`,
+            //   まずは視線の計測から始めます。顔を動かさないように画面の黄色い点を目で追ってください。`,
             // );
             // const transcription = await transcribeAudioVAD();
             // console.debug('[Main] transcribeAudioVAD returned', transcription);
@@ -158,12 +227,42 @@ document.addEventListener("DOMContentLoaded", () => {
               console.debug('[Main] waiting for processCompleted failed', err);
             }
 
-          // イベント受信後に音声再生
-          try {
-            await playVoiceFile(1, 155); // 必要に応じて番号を変更
-          } catch (err) {
-            console.debug('[Main] playVoiceFile failed', err);
-          }
+            // 実験開始前アンケート（pre）を実施
+            try {
+              await new Promise(r => setTimeout(r, 2000));
+              try {
+                await playVoiceFile(1);
+              } catch (e) { console.debug('[Main] playVoiceFile pre-valence failed', e); }
+              const valence_pre = await showSurveyQuestion('valence', 'Valence（快‐不快）', '今の気分を選んでください\n（1=非常に不快、9=非常に快）', '非常不快', '非常快');
+              clearBubbles();
+
+              try { await playVoiceFile(3); } catch (e) { console.debug('[Main] playVoiceFile pre-arousal failed', e); }
+              const arousal_pre = await showSurveyQuestion('arousal', 'Arousal（覚醒）', '今の覚醒状態（落ち着き‐興奮）を選んでください\n（1=とても落ち着いている、9=とても興奮/緊張している）', '落ち着き', '興奮/緊張');
+              clearBubbles();
+
+              // await playVoiceFile(4);
+              // const attention = await showSurveyQuestion('attention', '', 'この設問では「3」を選択してください。', '', '');
+              // clearBubbles();
+
+              try { await playVoiceFile(5); } catch (e) { console.debug('[Main] playVoiceFile pre-anxiety failed', e); }
+              const anxiety_pre = await showSurveyQuestion('anxiety', 'Anxiety（不安）', '今、不安はどのくらいですか？\n（1=まったく不安がない、9=とても不安）', 'まったく不安がない', 'とても不安');
+              clearBubbles();
+
+              try { await playVoiceFile(6); } catch (e) { console.debug('[Main] playVoiceFile pre-dominance failed', e); }
+              const dominance_pre = await showSurveyQuestion('dominance', 'Dominance（支配感）', 'いまのあなたは、この状況をどれくらい自分でコントロールできていると感じますか？\n（左＝圧倒されている／右＝コントロールできている）', '圧倒されている', 'コントロールできている');
+              clearBubbles();
+
+              try { await playVoiceFile(7, 130); } catch (e) { console.debug('[Main] playVoiceFile pre-complete failed', e); }
+
+              // 保存に pre を明示
+              saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'valence', value: valence_pre, when: 'pre', ts: Date.now() }, 'survey_valence_pre');
+              saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'arousal', value: arousal_pre, when: 'pre', ts: Date.now() }, 'survey_arousal_pre');
+              // saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'attention', value: attention, when: 'post', ts: Date.now() }, 'survey_attention_check');
+              saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'anxiety', value: anxiety_pre, when: 'pre', ts: Date.now() }, 'survey_anxiety_pre');
+              saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'dominance', value: dominance_pre, when: 'pre', ts: Date.now() }, 'survey_dominance_pre');
+            } catch (e) {
+              console.debug('[Main] pre-survey flow failed', e);
+            }
 
           // 再生終了後に「次へ」ボタンを表示し，クリックでエージェントを閉じる
           await new Promise((resolve) => {
@@ -201,6 +300,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 try { 
                   await Agent.hideAgent();
                   await handleStart();
+                  // showImages();
                   // await runExperimentSequence();
                  } catch (e) { console.debug('[Main] Agent.hideAgent failed', e); }
                 resolve();
@@ -532,6 +632,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let gazeCounts = null;
   let onGazeIn = null;
   let onGazeOOB = null;
+  // current displayed pair mapping: which side currently shows `joy` ("left" or "right")
+  let currentPairJoySide = 'left';
+  // history of mappings for the duration of aggregation: { idx, joySide, ts }
+  let pairMappingHistory = [];
   // normalized openRatio series (ema used for display)
   window.__normalizedOpenSeries = window.__normalizedOpenSeries || [];
 
@@ -543,7 +647,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // when true, the next call to showMessage() will unhide images and refresh canvases once
   let __deferShowImagesAfterNextMessage = false;
 
-  // ===== エージェントの表示/非表示 =====
+
   const hideImages = () => {
     clearImages();
     const wrap1 = canvas1?.closest('.canvas-square');
@@ -572,7 +676,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isRunning) return;
     isRunning = true;
     setBtnState(true);
-    btnToggle.style.display = 'none';
+    // btnToggle.style.display = 'none';
     hideImages();
 
     try {
@@ -603,6 +707,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   console.debug("[Main] キャリブレーション完了 → エージェント表示");
   showImages();
+
 
       // start the experiment orchestration after calibration
       await runExperimentSequence();
@@ -680,8 +785,11 @@ document.addEventListener("DOMContentLoaded", () => {
   function setPairForIndex(i) {
     const leftSrc = `assets/img/joy/joy (${i}).png`;
     const rightSrc = `assets/img/sad/sad (${i}).png`;
+    // default: left=joy, right=sad
     if (leftImg) leftImg.setSrc(leftSrc);
     if (rightImg) rightImg.setSrc(rightSrc);
+    // record mapping (joy on left)
+    try { currentPairJoySide = 'left'; pairMappingHistory.push({ idx: i, joySide: 'left', ts: Date.now() }); } catch(e){}
   }
 
   function clearImages() {
@@ -693,7 +801,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const total = endIdx - startIdx + 1;
     for (let k = 0; k < total; k++) {
       const idx = startIdx + k;
-      setPairForIndex(idx);
+      // decide randomly whether to swap left/right for this pair
+      const swap = (Math.random() < 0.5);
+      if (swap) {
+        // right = joy, left = sad
+        const leftSrc = `assets/img/sad/sad (${idx}).png`;
+        const rightSrc = `assets/img/joy/joy (${idx}).png`;
+        if (leftImg) leftImg.setSrc(leftSrc);
+        if (rightImg) rightImg.setSrc(rightSrc);
+        try { currentPairJoySide = 'right'; pairMappingHistory.push({ idx: idx, joySide: 'right', ts: Date.now() }); } catch(e){}
+      } else {
+        // left = joy, right = sad
+        setPairForIndex(idx);
+        try { /* setPairForIndex already pushed mapping */ } catch(e){}
+      }
       await new Promise(r => requestAnimationFrame(r));
       try { if (leftImg && typeof leftImg.refresh === 'function') leftImg.refresh(); } catch (e) {}
       try { if (rightImg && typeof rightImg.refresh === 'function') rightImg.refresh(); } catch (e) {}
@@ -803,24 +924,36 @@ document.addEventListener("DOMContentLoaded", () => {
     try{
       // 1回目: Valence
       await playVoiceFile(2, 130);
-      const valence = await showSurveyQuestion('valence', 'Valence（快‐不快）', '今の気分を選んでください（1=非常に不快、9=非常に快）', '非常不快', '非常快');
+      const valence = await showSurveyQuestion('valence', 'Valence（快‐不快）', '今の気分を選んでください\n（1=非常に不快、9=非常に快）', '非常不快', '非常快');
       clearBubbles();
       
       // 2回目: Arousal
       await playVoiceFile(3);
-      const arousal = await showSurveyQuestion('arousal', 'Arousal（覚醒）', '今の覚醒状態（落ち着き‐興奮）を選んでください（1=とても落ち着いている、9=とても興奮/緊張している）', '落ち着き', '興奮/緊張');
+      const arousal = await showSurveyQuestion('arousal', 'Arousal（覚醒）', '今の覚醒状態（落ち着き‐興奮）を選んでください\n（1=とても落ち着いている、9=とても興奮/緊張している）', '落ち着き', '興奮/緊張');
       clearBubbles();
 
-      // 3回目: anxiety
+      // 3回目: アテンションチェック
       await playVoiceFile(4);
-      const anxiety = await showSurveyQuestion('anxiety', 'Anxiety（不安）', '今、不安はどのくらいですか？（1=まったく不安がない、9=とても不安）', 'まったく不安がない', 'とても不安');
+      const attention = await showSurveyQuestion('attention', '', 'この設問では「3」を選択してください。', '', '');
       clearBubbles();
 
+      // 4回目: anxiety
       await playVoiceFile(5);
+      const anxiety = await showSurveyQuestion('anxiety', 'Anxiety（不安）', '今、不安はどのくらいですか？\n（1=まったく不安がない、9=とても不安）', 'まったく不安がない', 'とても不安');
+      clearBubbles();
+
+      // 5回目: Dominance（支配感）
+      await playVoiceFile(6);
+      const dominance = await showSurveyQuestion('dominance', 'Dominance（支配感）', 'いまのあなたは、この状況をどれくらい自分でコントロールできていると感じますか？\n（左＝圧倒されている／右＝コントロールできている）', '圧倒されている', 'コントロールできている');
+      clearBubbles();
+
+      await playVoiceFile(8);
       
-      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'valence', value: valence, ts: Date.now() }, 'survey_valence');
-      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'arousal', value: arousal, ts: Date.now() }, 'survey_arousal');
-      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'anxiety', value: anxiety, ts: Date.now() }, 'survey_anxiety');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'valence', value: valence, when: 'post', ts: Date.now() }, 'survey_valence_post');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'arousal', value: arousal, when: 'post', ts: Date.now() }, 'survey_arousal_post');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'attention', value: attention, when: 'post', ts: Date.now() }, 'survey_attention_check');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'anxiety', value: anxiety, when: 'post', ts: Date.now() }, 'survey_anxiety_post');
+      saveSurveyResults({ participant: participantNameRaw, participantSafe: participantNameSafe, type: 'dominance', value: dominance, when: 'post', ts: Date.now() }, 'survey_dominance_post');
     } catch (err) {
       console.debug('[Main] Question flow failed', err);
     }
@@ -964,12 +1097,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // try { hideImages(); } catch(e){}
     // showMessage('実験が終了しました。ご協力ありがとうございました。', 5);
   }
-  if (btnToggle) {
-    btnToggle.addEventListener("click", async () => {
-      if (!isRunning) await handleStart();
-      else await handleStop();
-    });
-  }
+  // if (btnToggle) {
+  //   btnToggle.addEventListener("click", async () => {
+  //     if (!isRunning) await handleStart();
+  //     else await handleStop();
+  //   });
+  // }
   if (btnStart) btnStart.addEventListener("click", handleStart);
   if (btnStop)  btnStop.addEventListener("click", handleStop);
 
@@ -1065,15 +1198,16 @@ function renderFinalResults(panel, gazeRes) {
     }
   }
   const L = Math.max(0, Math.min(100, Math.round(gazeRes.left  ?? 0)));
-  const R = Math.max(0, Math.min(100, Math.round(gazeRes.right ?? 0)));
+  // prefer emotion-based labels (joy/sad) if present
+  const J = Math.max(0, Math.min(100, Math.round(gazeRes.joy  ?? (gazeRes.left ?? 0))));
+  const S = Math.max(0, Math.min(100, Math.round(gazeRes.sad  ?? (gazeRes.right ?? 0))));
   const N = Math.max(0, Math.min(100, Math.round(gazeRes.none  ?? 0)));
   const dur = Math.max(0, gazeRes.durationSec ?? 0);
   const tot = Math.max(0, gazeRes.samplesTotal ?? 0);
-
   box.innerHTML = `
     <h4 style="margin:0 0 6px;">最終結果</h4>
     <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:baseline;">
-      <div>左: <b>${L}%</b>　右: <b>${R}%</b>　領域外: <b>${N}%</b></div>
+      <div>joy: <b>${J}%</b>　sad: <b>${S}%</b>　領域外: <b>${N}%</b></div>
       <small style="opacity:.8">計測 ${dur}s・samples:${tot}</small>
     </div>
   `;
@@ -1083,10 +1217,10 @@ function renderFinalResults(panel, gazeRes) {
 
   // ===== Utility =====
   function setBtnState(running) {
-    if (btnToggle) {
-      btnToggle.textContent = running ? "Stop" : "Start";
-      btnToggle.classList.toggle("active", running);
-    }
+    // if (btnToggle) {
+    //   btnToggle.textContent = running ? "Stop" : "Start";
+    //   btnToggle.classList.toggle("active", running);
+    // }
     if (btnStart) btnStart.disabled = running;
     if (btnStop)  btnStop.disabled  = !running;
   }
@@ -1097,7 +1231,10 @@ function renderFinalResults(panel, gazeRes) {
   // ===== 追加: 視線割合の集計ロジック =====
   function setupGazeAggregation(){
     // 初期化
-    gazeCounts = { left: 0, right: 0, oob: 0, totalIn: 0 };
+    // track counts by emotion (joy/sad) instead of absolute left/right
+    gazeCounts = { joy: 0, sad: 0, oob: 0, totalIn: 0 };
+    pairMappingHistory = [];
+    currentPairJoySide = 'left';
     gazeStartedAt = performance.now();
 
     // キャリブ側が dispatch しているイベントを購読（detail.ux を使用）
@@ -1106,10 +1243,16 @@ function renderFinalResults(panel, gazeRes) {
       const ux = ev?.detail?.ux;
       if (typeof ux !== "number") return;
       if (!gazeCounts) { console.debug('[Main] onGazeIn called but gazeCounts is null'); return; }
-      if (ux < 0.5) gazeCounts.left += 1;
-      else          gazeCounts.right += 1;
+      // determine which side user is looking at now
+      const gazeSide = (ux < 0.5) ? 'left' : 'right';
+      // map side to emotion based on currentPairJoySide
+      if (gazeSide === currentPairJoySide) {
+        gazeCounts.joy += 1;
+      } else {
+        gazeCounts.sad += 1;
+      }
       gazeCounts.totalIn += 1;
-      // console.debug("[Gaze] in ux=", ux.toFixed(3));
+      // console.debug("[Gaze] in ux=", ux.toFixed(3), 'mappedTo', (gazeSide===currentPairJoySide?'joy':'sad'));
     };
     onGazeOOB = () => {
       if (!gazeCounts) { console.debug('[Main] onGazeOOB called but gazeCounts is null'); return; }
@@ -1128,36 +1271,38 @@ function renderFinalResults(panel, gazeRes) {
     if (onGazeOOB) window.removeEventListener("gaze:out_of_bounds", onGazeOOB);
     const durMs = performance.now() - gazeStartedAt;
 
-    const leftCount  = gazeCounts?.left  || 0;
-    const rightCount = gazeCounts?.right || 0;
-    const noneCount  = gazeCounts?.oob   || 0;     // ← 見てない（out of bounds）
-    const inCount    = gazeCounts?.totalIn || 0;
+    const joyCount  = gazeCounts?.joy  || 0;
+    const sadCount  = gazeCounts?.sad  || 0;
+    const noneCount = gazeCounts?.oob  || 0;     // ← 見てない（out of bounds）
+    const inCount   = gazeCounts?.totalIn || 0;
 
-    const totalSamples = leftCount + rightCount + noneCount;
-    const denom = Math.max(1, totalSamples);       // 0割回避
+    const totalSamples = joyCount + sadCount + noneCount;
+    const denom = Math.max(1, totalSamples);
 
-    const pL = Math.round((leftCount  / denom) * 100);
-    const pR = Math.round((rightCount / denom) * 100);
-    const pN = Math.round((noneCount  / denom) * 100);
+    const pJoy = Math.round((joyCount / denom) * 100);
+    const pSad = Math.round((sadCount / denom) * 100);
+    const pN = Math.round((noneCount / denom) * 100);
 
     const result = {
       // 割合（合計≒100%）
-      left: pL,
-      right: pR,
+      joy: pJoy,
+      sad: pSad,
       none: pN,
-      // 素のカウントも残す
-      leftCount,
-      rightCount,
+      // 生のカウント
+      joyCount,
+      sadCount,
       noneCount,
       // 参考情報
       samplesIn: inCount,
       samplesTotal: totalSamples,
-      durationSec: Math.round(durMs / 1000)
+      durationSec: Math.round(durMs / 1000),
+      // mapping history for later analysis: sequence of which side held joy
+      mappingHistory: Array.isArray(pairMappingHistory) ? pairMappingHistory.slice() : []
     };
 
     console.debug("[Main] 視線割合集計結果:", result);
 
-    onGazeIn = null; onGazeOOB = null; gazeCounts = null;
+    onGazeIn = null; onGazeOOB = null; gazeCounts = null; currentPairJoySide = 'left'; pairMappingHistory = [];
     return result;
   }
 
@@ -1187,9 +1332,11 @@ function renderFinalResults(panel, gazeRes) {
         wrapper.style.borderRadius = '10px';
         wrapper.style.padding = '12px';
         wrapper.style.boxShadow = '0 8px 30px rgba(0,0,0,0.25)';
-        wrapper.style.minWidth = '260px';
+        // ensure a sensible minimum width so the survey UI remains legible
+        wrapper.style.minWidth = '500px';
         wrapper.style.maxWidth = '42vw';
         wrapper.style.fontFamily = 'sans-serif';
+        wrapper.style.fontSize = '20px';
 
         // position: prefer under chat, otherwise to the right of container
         const place = () => {
@@ -1217,11 +1364,11 @@ function renderFinalResults(panel, gazeRes) {
 
         wrapper.innerHTML = `
           <div style="font-weight:700; margin-bottom:6px; font-size:16px;">${title}</div>
-          <div style="font-size:14px; margin-bottom:8px; white-space:pre-wrap;">${prompt}</div>
+          <div style="font-size:20px; margin-bottom:8px; white-space:pre-wrap;">${prompt}</div>
           <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <span style="font-size:12px; width:48px; text-align:left;">${leftLabel}</span>
+            <span style="font-size:15px; width:48px; text-align:left;">${leftLabel}</span>
             <input id="agentSurveyRange" type="range" min="1" max="9" step="1" value="5" style="flex:1;">
-            <span style="font-size:12px; width:48px; text-align:right;">${rightLabel}</span>
+            <span style="font-size:15px; width:48px; text-align:right;">${rightLabel}</span>
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <small id="agentSurveyValue" style="opacity:.85">選択値: 5</small>
@@ -1280,6 +1427,10 @@ function renderFinalResults(panel, gazeRes) {
     try {
       // attach group info
       try { obj.group = window.__participantGroup || null; } catch(e){}
+      // attach participant metadata if available
+      try { obj.gender = window.__participantGender || null; } catch(e){}
+      try { obj.age = window.__participantAge || null; } catch(e){}
+      try { obj.consent = (typeof window !== 'undefined' && window.__participantConsent) ? window.__participantConsent : null; } catch(e){}
       const base = participantNameSafe || 'participant';
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
       const groupPart = (window.__participantGroup) ? `${window.__participantGroup}` : 'group';

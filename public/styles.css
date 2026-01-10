@@ -15,15 +15,21 @@ button { font: inherit; }
 #app {
   height: 100vh;
   display: grid;
+  /* allow the top spacer to be controlled via CSS var so it can be removed when collapsed */
+  --topSpacer: 0fr;
   --topH: 60vh;     /* 上段の固定高さ（少し縦に広げる） */
   --bottomH: 40vh;  /* 開いているときの下段高さ（上段を広げたので下段を調整） */
-  grid-template-rows: 1fr var(--topH) 28px var(--bottomH) 1fr;
+  grid-template-rows: var(--topSpacer) var(--topH) 28px var(--bottomH) 1fr;
   transition: grid-template-rows .25s ease;
 }
 
 /* トグルで閉じたとき：下段を0にし、上下スペーサーで上段を中央へ */
 #app.preview-collapsed {
   --bottomH: 0vh;
+  /* Keep the original top offset but expand the top area downward so the toggle stays lower.
+     This preserves the top's upper position and increases its height. */
+  /* --topSpacer: 1fr; */
+  --topH: 90vh;
 }
 
 /* 子要素の行割り当て */
@@ -44,7 +50,8 @@ button { font: inherit; }
   box-sizing: border-box;;
 }
 #topGrid {
-  width: min(1200px, 92vw);
+  /* allow wider layout for image display while keeping responsiveness */
+  width: min(1400px, 96vw);
   height: 100%;
   display: flex;
   gap: 16px;
@@ -102,9 +109,9 @@ button { font: inherit; }
   max-width: 100%;
   max-height: 100%;
 
-  /* allow the square to flex within the agent-row but not exceed half the row */
+  /* allow the square to flex within the agent-row and use a bit more space */
   flex: 1 1 0;
-  max-width: 50%;
+  max-width: 60%;
   box-sizing: border-box;
 
   /* make it a positioned container for the absolutely positioned canvas */

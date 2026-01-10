@@ -26,7 +26,7 @@ export async function runCalibration() {
 
   try {
   // ========= 1) 開眼ベースライン（3秒） =========
-  // setStep(ui, "自然に目を開けて表示される青い点を見てください", "");
+  // setStep(ui, "自然に目を開けて表示される黄色い点を見てください", "");
   // overlay.place(0.5, 0.5);
   // await sleep(350);
   // const openSamples = await sampleEyeMetrics(3000);
@@ -34,8 +34,8 @@ export async function runCalibration() {
   // overlay.hide();
 
   // ========= 1b) 閉眼ベースライン（改良フロー） =========
-  // 流れ：指示を3秒表示 -> 消す -> 青い点を表示して開眼データを3秒取得 -> 点を消す
-  setStep(ui, "自然に目を開けて、表示される青い点を見てください", "");
+  // 流れ：指示を3秒表示 -> 消す -> 黄色い点を表示して開眼データを3秒取得 -> 点を消す
+  setStep(ui, "自然に目を開けて、表示される黄色い点を見てください", "");
   await sleep(3000);
   // clear instruction before showing the point
   setStep(ui, "", "");
@@ -62,8 +62,8 @@ export async function runCalibration() {
   const calibSamples = [];
     const N_PER_POINT = 90; // approx 3s @ 30fps
 
-    // show practice instruction: keep face still and follow the blue dot with eyes only
-    setStep(ui, "顔を動かさないように視線だけで青い点を追ってください", "");
+    // show practice instruction: keep face still and follow the yellow dot with eyes only
+    setStep(ui, "顔を動かさないように視線だけで黄色い点を追ってください", "");
     await sleep(5000);
     setStep(ui, "", "");
 
@@ -335,7 +335,7 @@ function createAgentOverlay(canvas){
   const target = document.createElement("div");
   Object.assign(target.style, {
     position:"absolute", width:"14px", height:"14px", borderRadius:"999px",
-    background:"#2d7ff9", boxShadow:"0 0 0 6px rgba(45,127,249,.18)", transform:"translate(-50%,-50%)",
+    background:"#ffd43b", boxShadow:"0 0 0 6px rgba(255,212,59,.18)", transform:"translate(-50%,-50%)",
     opacity: "0"
   });
   wrapper.appendChild(target);

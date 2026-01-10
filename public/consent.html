@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>同意書</title>
+  <style>
+    body{font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; background:#0b0f19; color:#eef; margin:0; display:flex; align-items:center; justify-content:center; height:100vh}
+    .box{background:#fff; color:#111; max-width:900px; width:92%; padding:24px; border-radius:10px; box-shadow:0 12px 40px rgba(0,0,0,0.35)}
+    h1{margin:0 0 12px 0}
+    .text{white-space:pre-wrap; line-height:1.6; margin-bottom:18px}
+    .actions{display:flex; gap:12px; justify-content:flex-end}
+    button{padding:10px 14px; border-radius:8px; border:none; cursor:pointer}
+    .agree{background:linear-gradient(90deg,#4b8cff,#3366ff); color:#fff}
+    .disagree{background:#ddd}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>実験参加の同意</h1>
+    <div class="text">
+      以下はダミーの同意書です。実際の実験で使用する前に内容を確認し、必要な法的表現や個人情報取扱いの説明を追加してください。
+
+      ・実験の目的：視線と感情反応の計測
+      ・記録されるデータ：視線座標、顔ランドマーク、アンケート回答（年齢・性別等）
+      ・データの利用：研究目的の集計解析のみに使用し、個人が特定される形で公開しません。
+      ・同意は任意であり、いつでも中止できます。
+    </div>
+    <div class="actions">
+      <button class="disagree" id="btnDisagree">同意しない</button>
+      <button class="agree" id="btnAgree">同意する</button>
+    </div>
+  </div>
+  <script>
+    const agree = () => {
+      try {
+        const payload = { agreed: true, ts: Date.now() };
+        // store in sessionStorage so the consent is available only for this navigation/session
+        sessionStorage.setItem('participantConsentSession', JSON.stringify(payload));
+        // remove any lingering localStorage consent so reloads do not persist consent
+        try { localStorage.removeItem('participantConsent'); } catch(e){}
+        // if a `next` param is present, return there (preserves query string)
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const next = params.get('next');
+          if (next) {
+            const dest = decodeURIComponent(next);
+            // basic safety: ensure dest is same-origin and points to index.html or a path under current site
+            try {
+              const u = new URL(dest, window.location.href);
+              if (u.origin === window.location.origin) {
+                window.location.href = u.href;
+                return;
+              }
+            } catch(e) {}
+          }
+        } catch(e) {}
+      } catch(e) {}
+      // fallback: redirect back to index
+      window.location.href = './index.html';
+    };
+    const disagree = () => {
+      try { localStorage.removeItem('participantConsent'); sessionStorage.removeItem('participantConsentSession'); } catch(e){}
+      alert('同意がないため実験を開始できません。');
+    };
+    document.getElementById('btnAgree').addEventListener('click', agree);
+    document.getElementById('btnDisagree').addEventListener('click', disagree);
+  </script>
+</body>
+</html>

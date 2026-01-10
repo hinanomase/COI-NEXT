@@ -78,9 +78,10 @@ class SetAgent {
     Object.assign(overlay.style, { position: 'fixed', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', zIndex: 20000, paddingRight: '42vw', boxSizing: 'border-box' });
     const container = document.createElement('div'); container.id = 'agentOverlayContainer';
     // limit container width so it doesn't extend into the reserved chat area
-    Object.assign(container.style, { width: 'min(720px, calc(90vw - 42vw))', maxWidth: '900px', height: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', boxSizing: 'border-box' });
+    Object.assign(container.style, { width: 'min(720px, calc(90vw - 42vw))', maxWidth: '900px', height: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', boxSizing: 'border-box', aspectRatio: '1 / 1' });
     const canvas = document.createElement('canvas'); canvas.id = uniqueCanvasId;
-    canvas.style.width = '100%'; canvas.style.height = 'auto'; canvas.style.maxHeight = '80vh';
+    canvas.style.width = '100%'; canvas.style.height = '100%'; canvas.style.maxHeight = 'none'; canvas.style.aspectRatio = '1 / 1';
+    // canvas.style.width = '100%'; canvas.style.height = 'flex'; canvas.style.maxHeight = '80vh';
     container.appendChild(canvas);
     overlay.appendChild(container);
     document.body.appendChild(overlay);
